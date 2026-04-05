@@ -246,9 +246,8 @@ render_draw_data :: proc(draw_data: ^im.Draw_Data, cmd_buf: gpu.Command_Buffer)
                     tex_id = u32(im.draw_cmd_get_tex_id(pcmd)),
                     sampler_id = render_state.sampler_current_id,
                 }
-                indices_shifted := indices
-                indices_shifted = gpu.subslice(indices_shifted, pcmd.idx_offset)
-                gpu.cmd_draw_indexed(cmd_buf, vert_data, frag_data, gpu.subslice(indices_shifted, 0, pcmd.elem_count))
+                offset_start := i32(pcmd.idx_offset) + global_idx_offset
+                gpu.cmd_draw_indexed(cmd_buf, vert_data, frag_data, gpu.subslice(indices, offset_start, offset_start + i32(pcmd.elem_count)))
             }
         }
         global_idx_offset += draw_list.idx_buffer.size

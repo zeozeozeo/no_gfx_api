@@ -494,9 +494,9 @@ cmd_mem_copy_ptr :: #force_inline proc(cmd_buf: Command_Buffer, dst: ptr_t($T), 
     cmd_mem_copy_raw(cmd_buf, dst.gpu, src.gpu, size_of(T), loc = loc)
 }
 
-cmd_mem_copy_slice :: proc(cmd_buf: Command_Buffer, dst: slice_t($T), src: slice_t(T), #any_int count: i32, loc := #caller_location)
+cmd_mem_copy_slice :: proc(cmd_buf: Command_Buffer, dst: slice_t($T), src: slice_t(T), loc := #caller_location)
 {
-    cmd_mem_copy_raw(cmd_buf, dst.gpu, src.gpu, size_of(T) * count, loc = loc)
+    cmd_mem_copy_raw(cmd_buf, dst.gpu, src.gpu, size_of(T) * min(slice_len(dst), slice_len(src)), loc = loc)
 }
 
 cmd_mem_copy :: proc {

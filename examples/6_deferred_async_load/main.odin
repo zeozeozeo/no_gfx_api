@@ -637,13 +637,11 @@ create_fullscreen_quad :: proc(
 		cmd_buf,
 		full_screen_quad_verts_local,
 		fsq_verts,
-		len(fsq_verts.cpu),
 	)
 	gpu.cmd_mem_copy(
 		cmd_buf,
 		full_screen_quad_indices_local,
 		fsq_indices,
-		len(fsq_indices.cpu),
 	)
 
 	return full_screen_quad_verts_local, full_screen_quad_indices_local
@@ -908,10 +906,10 @@ upload_mesh :: proc(upload_arena: ^gpu.Arena, cmd_buf: gpu.Command_Buffer, mesh:
 	res.uvs = gpu.mem_alloc([2]f32, len(mesh.uvs), mem_type = gpu.Memory.GPU)
 	res.indices = gpu.mem_alloc(u32, len(mesh.indices), mem_type = gpu.Memory.GPU)
 	res.idx_count = u32(len(mesh.indices))
-	gpu.cmd_mem_copy(cmd_buf, res.pos,     positions_staging, len(mesh.pos))
-	gpu.cmd_mem_copy(cmd_buf, res.normals, normals_staging,   len(mesh.normals))
-	gpu.cmd_mem_copy(cmd_buf, res.uvs,     uvs_staging,       len(mesh.uvs))
-	gpu.cmd_mem_copy(cmd_buf, res.indices, indices_staging,   len(mesh.indices))
+	gpu.cmd_mem_copy(cmd_buf, res.pos,     positions_staging)
+	gpu.cmd_mem_copy(cmd_buf, res.normals, normals_staging  )
+	gpu.cmd_mem_copy(cmd_buf, res.uvs,     uvs_staging      )
+	gpu.cmd_mem_copy(cmd_buf, res.indices, indices_staging  )
 	return res
 }
 

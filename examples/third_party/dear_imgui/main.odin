@@ -90,8 +90,8 @@ main :: proc()
     sampler_id := gpu.desc_pool_alloc_sampler(&desc_pool, gpu.sampler_descriptor({}))
 
     upload_cmd_buf := gpu.commands_begin(.Main)
-    gpu.cmd_mem_copy(upload_cmd_buf, verts_local, verts, 3)
-    gpu.cmd_mem_copy(upload_cmd_buf, indices_local, indices, 3)
+    gpu.cmd_mem_copy(upload_cmd_buf, verts_local, verts)
+    gpu.cmd_mem_copy(upload_cmd_buf, indices_local, indices)
     gpu.cmd_barrier(upload_cmd_buf, .Transfer, .All, {})
     gpu.queue_submit(.Main, { upload_cmd_buf })
 

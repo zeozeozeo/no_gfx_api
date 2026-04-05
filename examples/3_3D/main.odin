@@ -212,10 +212,10 @@ upload_mesh :: proc(upload_arena: ^gpu.Arena, cmd_buf: gpu.Command_Buffer, mesh:
     res.normals = gpu.mem_alloc([4]f32, len(mesh.normals), gpu.Memory.GPU)
     res.uvs = gpu.mem_alloc([2]f32, len(mesh.uvs), gpu.Memory.GPU)
     res.indices = gpu.mem_alloc(u32, len(mesh.indices), gpu.Memory.GPU)
-    gpu.cmd_mem_copy(cmd_buf, res.pos, positions_staging, len(mesh.pos))
-    gpu.cmd_mem_copy(cmd_buf, res.normals, normals_staging, len(mesh.normals))
-    gpu.cmd_mem_copy(cmd_buf, res.uvs, uvs_staging, len(mesh.uvs))
-    gpu.cmd_mem_copy(cmd_buf, res.indices, indices_staging, len(mesh.indices))
+    gpu.cmd_mem_copy(cmd_buf, res.pos, positions_staging)
+    gpu.cmd_mem_copy(cmd_buf, res.normals, normals_staging)
+    gpu.cmd_mem_copy(cmd_buf, res.uvs, uvs_staging)
+    gpu.cmd_mem_copy(cmd_buf, res.indices, indices_staging)
     return res
 }
 

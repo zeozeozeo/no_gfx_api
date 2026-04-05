@@ -99,8 +99,8 @@ main :: proc()
         gpu.texture_free_and_destroy(&peach_tex)
         gpu.texture_free_and_destroy(&bowser_tex)
     }
-    gpu.cmd_mem_copy(upload_cmd_buf, verts_local, verts, len(verts.cpu))
-    gpu.cmd_mem_copy(upload_cmd_buf, indices_local, indices, len(indices.cpu))
+    gpu.cmd_mem_copy(upload_cmd_buf, verts_local, verts)
+    gpu.cmd_mem_copy(upload_cmd_buf, indices_local, indices)
     gpu.cmd_barrier(upload_cmd_buf, .Transfer, .All, {})
 
     gpu.queue_submit(.Main, { upload_cmd_buf })

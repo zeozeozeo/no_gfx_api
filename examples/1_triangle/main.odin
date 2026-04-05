@@ -59,19 +59,14 @@ main :: proc()
     verts.cpu[0].pos = { -0.5,  0.5, 0.0 }
     verts.cpu[1].pos = {  0.0, -0.5, 0.0 }
     verts.cpu[2].pos = {  0.5,  0.5, 0.0 }
-    // verts.cpu[3].pos = {  -0.5,  -0.5, 0.0 }
     verts.cpu[0].color = { 1.0, 0.0, 0.0 }
     verts.cpu[1].color = { 0.0, 1.0, 0.0 }
     verts.cpu[2].color = { 0.0, 0.0, 1.0 }
-    // verts.cpu[3].color = { 0.0, 0.0, 1.0 }
 
     indices := gpu.arena_alloc(&arena, u32, 3)
     indices.cpu[0] = 0
     indices.cpu[1] = 2
     indices.cpu[2] = 1
-    // indices.cpu[3+0] = 0
-    // indices.cpu[3+1] = 3
-    // indices.cpu[3+2] = 1
 
     verts_local := gpu.mem_alloc(Vertex, 3, gpu.Memory.GPU)
     indices_local := gpu.mem_alloc(u32, 3, gpu.Memory.GPU)
@@ -81,8 +76,8 @@ main :: proc()
     }
 
     upload_cmd_buf := gpu.commands_begin(.Main)
-    gpu.cmd_mem_copy(upload_cmd_buf, verts_local, verts, len(verts.cpu))
-    gpu.cmd_mem_copy(upload_cmd_buf, indices_local, indices, len(indices.cpu))
+    gpu.cmd_mem_copy(upload_cmd_buf, verts_local, verts)
+    gpu.cmd_mem_copy(upload_cmd_buf, indices_local, indices)
     gpu.cmd_barrier(upload_cmd_buf, .Transfer, .All, {})
     gpu.queue_submit(.Main, { upload_cmd_buf })
 

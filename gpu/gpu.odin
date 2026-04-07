@@ -60,6 +60,7 @@ Store_Op :: enum { Store = 0, Dont_Care, Resolve, Resolve_And_Store }
 Compare_Op :: enum { Never = 0, Less, Equal, Less_Equal, Greater, Not_Equal, Greater_Equal, Always }
 Blend_Op :: enum { Add, Subtract, Rev_Subtract, Min, Max }
 Blend_Factor :: enum { Zero, One, Src_Color, Dst_Color, Src_Alpha, Dst_Alpha, One_Minus_Src_Alpha, One_Minus_Src_Color, One_Minus_Dst_Alpha, One_Minus_Dst_Color }
+Index_Format :: enum { U32 = 0, U16 }
 Topology :: enum { Triangle_List = 0, Triangle_Strip, Triangle_Fan };
 Cull_Mode :: enum { Cull_CW = 0, Cull_CCW, None, All };
 Depth_Mode :: enum { Read = 0, Write }
@@ -368,7 +369,6 @@ cmd_set_blend_state: proc(cmd_buf: Command_Buffer, state: Blend_State, loc := #c
 cmd_set_viewport: proc(cmd_buf: Command_Buffer, viewport: Viewport, loc := #caller_location) : _cmd_set_viewport
 cmd_set_scissor: proc(cmd_buf: Command_Buffer, scissor: Rect_2D, loc := #caller_location) : _cmd_set_scissor
 
-// Run compute shader based on number of groups
 cmd_dispatch: proc(cmd_buf: Command_Buffer, compute_data: gpuptr, num_groups_x: u32, num_groups_y: u32 = 1, num_groups_z: u32 = 1, loc := #caller_location) : _cmd_dispatch
 
 // Schedule indirect compute shader based on number of groups, arguments is a pointer to a Dispatch_Indirect_Command struct
@@ -377,13 +377,13 @@ cmd_dispatch_indirect_raw: proc(cmd_buf: Command_Buffer, compute_data, arguments
 cmd_begin_render_pass: proc(cmd_buf: Command_Buffer, desc: Render_Pass_Desc, loc := #caller_location) : _cmd_begin_render_pass
 cmd_end_render_pass: proc(cmd_buf: Command_Buffer, loc := #caller_location) : _cmd_end_render_pass
 
-// Indices, vertex_data and fragment_data can be nil
+// Vertex_data and fragment_data can be nil if not used in the currently bound shader
 cmd_draw_indexed_raw: proc(cmd_buf: Command_Buffer, vertex_data, fragment_data, indices: gpuptr,
-                           index_count: u32, instance_count: u32 = 1, loc := #caller_location) : _cmd_draw_indexed_raw
-cmd_draw_indexed_indirect_raw: proc(cmd_buf: Command_Buffer, vertex_data, fragment_data, indices,
-                                    indirect_arguments: gpuptr, loc := #caller_location) : _cmd_draw_indexed_indirect_raw
+                           index_format: Index_Format, index_count: u32, instance_count: u32 = 1, loc := #caller_location) : _cmd_draw_indexed_raw
+cmd_draw_indexed_indirect_raw: proc(cmd_buf: Command_Buffer, vertex_data, fragment_data, indices: gpuptr,
+                                    index_format: Index_Format, indirect_arguments: gpuptr, loc := #caller_location) : _cmd_draw_indexed_indirect_raw
 cmd_draw_indexed_indirect_multi_raw: proc(cmd_buf: Command_Buffer, vertex_data, fragment_data, indices: gpuptr,
-                                          indirect_arguments: gpuptr, stride: u32, draw_count: gpuptr, loc := #caller_location) : _cmd_draw_indexed_indirect_multi_raw
+                                          index_format: Index_Format, indirect_arguments: gpuptr, stride: u32, draw_count: gpuptr, loc := #caller_location) : _cmd_draw_indexed_indirect_multi_raw
 
 cmd_build_blas: proc(cmd_buf: Command_Buffer, bvh: BVH, scratch_storage: gpuptr, shapes: []BVH_Shape, loc := #caller_location) : _cmd_build_blas
 cmd_build_tlas: proc(cmd_buf: Command_Buffer, bvh: BVH, scratch_storage: gpuptr, instances: gpuptr, loc := #caller_location) : _cmd_build_tlas
@@ -420,10 +420,12 @@ slice_to_ptr :: #force_inline proc(s: slice_t($T)) -> ptr_t(T)
 }
 
 // Type-safe variants of raw procedures
-cmd_draw_indexed :: #force_inline proc(cmd_buf: Command_Buffer, vertex_data, fragment_data: gpuptr, indices: slice_t(u32),
+cmd_draw_indexed :: #force_inline proc(cmd_buf: Command_Buffer, vertex_data, fragment_data: gpuptr, indices: slice_t($T),
                                        instance_count: u32 = 1, loc := #caller_location)
 {
-    cmd_draw_indexed_raw(cmd_buf, vertex_data, fragment_data, indices, u32(slice_len(indices)), instance_count, loc)
+    #assert(T == u32 || T == u16)
+    idx_fmt: Index_Format = .U32 when T == u32 else .U16
+    cmd_draw_indexed_raw(cmd_buf, vertex_data, fragment_data, indices, idx_fmt, u32(slice_len(indices)), instance_count, loc)
 }
 
 cmd_dispatch_indirect :: #force_inline proc(cmd_buf: Command_Buffer, compute_data: gpuptr,
@@ -432,16 +434,20 @@ cmd_dispatch_indirect :: #force_inline proc(cmd_buf: Command_Buffer, compute_dat
     cmd_dispatch_indirect_raw(cmd_buf, compute_data, arguments, loc)
 }
 
-cmd_draw_indexed_indirect :: #force_inline proc(cmd_buf: Command_Buffer, vertex_data, fragment_data, indices: gpuptr,
-                                                indirect_arguments: ptr_t($T), loc := #caller_location)
+cmd_draw_indexed_indirect :: #force_inline proc(cmd_buf: Command_Buffer, vertex_data, fragment_data: gpuptr, indices: slice_t($T),
+                                                indirect_arguments: ptr_t($T2), loc := #caller_location)
 {
-    cmd_draw_indexed_indirect_raw(cmd_buf, vertex_data, fragment_data, indices, indirect_arguments, loc)
+    #assert(T == u32 || T == u16)
+    idx_fmt: Index_Format = .U32 when T == u32 else .U16
+    cmd_draw_indexed_indirect_raw(cmd_buf, vertex_data, fragment_data, indices, idx_fmt, indirect_arguments, loc)
 }
 
-cmd_draw_indexed_indirect_multi :: #force_inline proc(cmd_buf: Command_Buffer, vertex_data, fragment_data, indices: gpuptr,
-                                                      indirect_arguments: slice_t($T), draw_count: ptr_t(u32), loc := #caller_location)
+cmd_draw_indexed_indirect_multi :: #force_inline proc(cmd_buf: Command_Buffer, vertex_data, fragment_data: gpuptr, indices: slice_t($T),
+                                                      indirect_arguments: slice_t($T2), draw_count: ptr_t(u32), loc := #caller_location)
 {
-    cmd_draw_indexed_indirect_multi_raw(cmd_buf, vertex_data, fragment_data, indices, indirect_arguments, size_of(T), draw_count, loc)
+    #assert(T == u32 || T == u16)
+    idx_fmt: Index_Format = .U32 when T == u32 else .U16
+    cmd_draw_indexed_indirect_multi_raw(cmd_buf, vertex_data, fragment_data, indices, idx_fmt, indirect_arguments, size_of(T2), draw_count, loc)
 }
 
 // Memory

@@ -289,7 +289,7 @@ create_fonts_texture :: proc(desc_pool: ^gpu.Descriptor_Pool)
         format = .RGBA8_Unorm,
         usage = { .Sampled },
     })
-    gpu.cmd_copy_to_texture(cmd_buf, bd.fonts_texture, staging, bd.fonts_texture.mem)
+    gpu.cmd_copy_to_texture(cmd_buf, bd.fonts_texture, staging)
 
     bd.fonts_texture_id = gpu.desc_pool_alloc_texture(desc_pool, gpu.texture_view_descriptor(bd.fonts_texture, {}))
 

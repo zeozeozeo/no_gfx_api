@@ -351,7 +351,7 @@ build_blas :: proc(bvh_scratch_arena: ^gpu.Arena, cmd_buf: gpu.Command_Buffer, p
     }
     bvh := gpu.bvh_alloc_and_create(desc)
     scratch := gpu.bvh_alloc_build_scratch_buffer(bvh_scratch_arena, desc)
-    gpu.cmd_build_blas(cmd_buf, bvh, bvh.mem, scratch, { gpu.BVH_Mesh { verts = positions.gpu.ptr, indices = indices.gpu.ptr } })
+    gpu.cmd_build_blas(cmd_buf, bvh, scratch, { gpu.BVH_Mesh { verts = positions.gpu.ptr, indices = indices.gpu.ptr } })
     return bvh
 }
 
@@ -363,7 +363,7 @@ build_tlas :: proc(bvh_scratch_arena: ^gpu.Arena, cmd_buf: gpu.Command_Buffer, i
     }
     bvh := gpu.bvh_alloc_and_create(desc)
     scratch := gpu.bvh_alloc_build_scratch_buffer(bvh_scratch_arena, desc)
-    gpu.cmd_build_tlas(cmd_buf, bvh, bvh.mem, scratch, instances)
+    gpu.cmd_build_tlas(cmd_buf, bvh, scratch, instances)
     return bvh
 }
 

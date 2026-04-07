@@ -2084,29 +2084,28 @@ _cmd_mem_copy_raw :: proc(cmd_buf: Command_Buffer, dst, src: gpuptr, #any_int by
 }
 
 // TODO: dst is ignored atm.
-_cmd_copy_to_texture :: proc(cmd_buf: Command_Buffer, texture: Texture, src, dst: gpuptr, loc := #caller_location)
+_cmd_copy_to_texture :: proc(cmd_buf: Command_Buffer, dst: Texture, src: gpuptr, loc := #caller_location)
 {
     if ctx.validation
     {
         ok := true
         ok &= pool_check(&ctx.command_buffers, cmd_buf, "cmd_buf", loc)
         ok &= check_ptr(src, "src", loc)
-        ok &= check_ptr(dst, "dst", loc)
         if !ok do return
     }
 
     cmd_buf_info := pool_get(&ctx.command_buffers, cmd_buf)
-    tex_info := pool_get(&ctx.textures, texture.handle)
+    tex_info := pool_get(&ctx.textures, dst.handle)
     vk_image := tex_info.handle
 
     src_buf, src_offset, _ := get_buf_offset_from_gpu_ptr(src)
 
-    plane_aspect: vk.ImageAspectFlags = { .DEPTH } if texture.format == .D32_Float else { .COLOR }
+    plane_aspect: vk.ImageAspectFlags = { .DEPTH } if dst.format == .D32_Float else { .COLOR }
 
     vk.CmdCopyBufferToImage(cmd_buf_info.handle, src_buf, vk_image, .GENERAL, 1, &vk.BufferImageCopy {
         bufferOffset = vk.DeviceSize(src_offset),
-        bufferRowLength = texture.dimensions.x,
-        bufferImageHeight = texture.dimensions.y,
+        bufferRowLength = dst.dimensions.x,
+        bufferImageHeight = dst.dimensions.y,
         imageSubresource = {
             aspectMask = plane_aspect,
             mipLevel = 0,
@@ -2114,7 +2113,7 @@ _cmd_copy_to_texture :: proc(cmd_buf: Command_Buffer, texture: Texture, src, dst
             layerCount = 1,
         },
         imageOffset = {},
-        imageExtent = { texture.dimensions.x, texture.dimensions.y, texture.dimensions.z }
+        imageExtent = { dst.dimensions.x, dst.dimensions.y, dst.dimensions.z }
     })
 }
 
@@ -2863,7 +2862,7 @@ _cmd_draw_indexed_indirect_multi_raw :: proc(cmd_buf: Command_Buffer, vertex_dat
     vk.CmdDrawIndexedIndirectCount(vk_cmd_buf, arguments_buf, vk.DeviceSize(arguments_offset), draw_count_buf, vk.DeviceSize(draw_count_offset), max_draw_count, stride)
 }
 
-_cmd_build_blas :: proc(cmd_buf: Command_Buffer, bvh: BVH, bvh_storage, scratch_storage: gpuptr, shapes: []BVH_Shape, loc := #caller_location)
+_cmd_build_blas :: proc(cmd_buf: Command_Buffer, bvh: BVH, scratch_storage: gpuptr, shapes: []BVH_Shape, loc := #caller_location)
 {
     if ctx.validation
     {
@@ -2937,7 +2936,7 @@ _cmd_build_blas :: proc(cmd_buf: Command_Buffer, bvh: BVH, bvh_storage, scratch_
     vk.CmdBuildAccelerationStructuresKHR(vk_cmd_buf, 1, &build_info, &range_infos_ptr)
 }
 
-_cmd_build_tlas :: proc(cmd_buf: Command_Buffer, bvh: BVH, bvh_storage, scratch_storage, instances: gpuptr, loc := #caller_location)
+_cmd_build_tlas :: proc(cmd_buf: Command_Buffer, bvh: BVH, scratch_storage, instances: gpuptr, loc := #caller_location)
 {
     if ctx.validation
     {

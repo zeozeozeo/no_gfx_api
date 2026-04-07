@@ -596,7 +596,7 @@ create_magenta_texture :: proc(
 			usage = {.Sampled},
 		},
 	)
-	gpu.cmd_copy_to_texture(cmd_buf, texture, staging, texture.mem)
+	gpu.cmd_copy_to_texture(cmd_buf, texture, staging)
 	return texture
 }
 
@@ -772,7 +772,7 @@ upload_texture :: proc(
 	{
 		// Upload texture to GPU
 		upload_cmd_buf := gpu.commands_begin(.Transfer)
-		gpu.cmd_copy_to_texture(upload_cmd_buf, texture, staging, texture.mem)
+		gpu.cmd_copy_to_texture(upload_cmd_buf, texture, staging)
 		gpu.cmd_add_signal_semaphore(upload_cmd_buf, upload_sem, upload_sem_value_old + 1)
 		gpu.queue_submit(.Transfer, {upload_cmd_buf})
 	}

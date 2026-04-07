@@ -90,8 +90,8 @@ main :: proc()
     sampler_id := gpu.desc_pool_alloc_sampler(&desc_pool, gpu.sampler_descriptor({}))
 
     upload_cmd_buf := gpu.commands_begin(.Main)
-    gpu.cmd_mem_copy(upload_cmd_buf, verts_local, verts, 3)
-    gpu.cmd_mem_copy(upload_cmd_buf, indices_local, indices, 3)
+    gpu.cmd_mem_copy(upload_cmd_buf, verts_local, verts)
+    gpu.cmd_mem_copy(upload_cmd_buf, indices_local, indices)
     gpu.cmd_barrier(upload_cmd_buf, .Transfer, .All, {})
     gpu.queue_submit(.Main, { upload_cmd_buf })
 
@@ -171,7 +171,7 @@ main :: proc()
         }
         verts_data := gpu.arena_alloc(frame_arena, Vert_Data)
         verts_data.cpu.verts = verts_local.gpu.ptr
-        gpu.cmd_draw_indexed_instanced(cmd_buf, verts_data.gpu, {}, indices_local, 3, 1)
+        gpu.cmd_draw_indexed(cmd_buf, verts_data.gpu, {}, indices_local)
 
         // Render ImGui on top
         draw_data := imgui.get_draw_data()

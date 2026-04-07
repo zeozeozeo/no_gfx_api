@@ -1,4 +1,6 @@
 
+#+vet !unused-imports
+
 package main
 
 import log "core:log"
@@ -99,8 +101,8 @@ main :: proc()
         gpu.texture_free_and_destroy(&peach_tex)
         gpu.texture_free_and_destroy(&bowser_tex)
     }
-    gpu.cmd_mem_copy(upload_cmd_buf, verts_local, verts, len(verts.cpu))
-    gpu.cmd_mem_copy(upload_cmd_buf, indices_local, indices, len(indices.cpu))
+    gpu.cmd_mem_copy(upload_cmd_buf, verts_local, verts)
+    gpu.cmd_mem_copy(upload_cmd_buf, indices_local, indices)
     gpu.cmd_barrier(upload_cmd_buf, .Transfer, .All, {})
 
     gpu.queue_submit(.Main, { upload_cmd_buf })
@@ -171,7 +173,7 @@ main :: proc()
         frag_data.cpu.sampler = linear_sampler
         frag_data.cpu.fade = changing_fade(delta_time)
 
-        gpu.cmd_draw_indexed_instanced(cmd_buf, verts_data.gpu, frag_data.gpu, indices_local, u32(len(indices.cpu)), 1)
+        gpu.cmd_draw_indexed(cmd_buf, verts_data, frag_data, indices_local)
         gpu.cmd_end_render_pass(cmd_buf)
         gpu.cmd_add_signal_semaphore(cmd_buf, frame_sem, next_frame)
         gpu.queue_submit(.Main, { cmd_buf })
@@ -222,14 +224,9 @@ load_texture :: proc(bytes: []byte, upload_arena: ^gpu.Arena, cmd_buf: gpu.Comma
         format = .RGBA8_Unorm,
         usage = { .Sampled },
     })
-    gpu.cmd_copy_to_texture(cmd_buf, texture, staging.gpu, texture.mem)
+    gpu.cmd_copy_to_texture(cmd_buf, texture, staging)
     return texture
 }
-
-// To get around the fact that I need to import "core:image/png" to load pngs,
-// but then -vet complains because it's not used.
-@(private="file")
-_fictitious :: proc() -> png.Error { return {} }
 
 changing_fade :: proc(delta_time: f32) -> f32
 {

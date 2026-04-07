@@ -76,8 +76,8 @@ main :: proc()
     }
 
     upload_cmd_buf := gpu.commands_begin(.Main)
-    gpu.cmd_mem_copy(upload_cmd_buf, verts_local, verts, len(verts.cpu))
-    gpu.cmd_mem_copy(upload_cmd_buf, indices_local, indices, len(indices.cpu))
+    gpu.cmd_mem_copy(upload_cmd_buf, verts_local, verts)
+    gpu.cmd_mem_copy(upload_cmd_buf, indices_local, indices)
     gpu.cmd_barrier(upload_cmd_buf, .Transfer, .All, {})
     gpu.queue_submit(.Main, { upload_cmd_buf })
 
@@ -131,7 +131,7 @@ main :: proc()
         verts_data := gpu.arena_alloc(frame_arena, Vert_Data)
         verts_data.cpu^ = { verts = verts_local.gpu.ptr }
 
-        gpu.cmd_draw_indexed_instanced(cmd_buf, verts_data, {}, indices_local, 3, 1)
+        gpu.cmd_draw_indexed(cmd_buf, verts_data, {}, indices_local)
         gpu.cmd_end_render_pass(cmd_buf)
         gpu.cmd_add_signal_semaphore(cmd_buf, frame_sem, next_frame)
         gpu.queue_submit(.Main, { cmd_buf })

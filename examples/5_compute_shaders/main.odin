@@ -120,8 +120,8 @@ main :: proc()
     }
 
     upload_cmd_buf := gpu.commands_begin(.Main)
-    gpu.cmd_mem_copy(upload_cmd_buf, verts_local, verts, len(verts.cpu))
-    gpu.cmd_mem_copy(upload_cmd_buf, indices_local, indices, len(indices.cpu))
+    gpu.cmd_mem_copy(upload_cmd_buf, verts_local, verts)
+    gpu.cmd_mem_copy(upload_cmd_buf, indices_local, indices)
     gpu.cmd_barrier(upload_cmd_buf, .Transfer, .All, {})
     gpu.queue_submit(.Main, { upload_cmd_buf })
 
@@ -200,9 +200,9 @@ main :: proc()
                 num_groups_z,
             }
 
-            gpu.cmd_dispatch_indirect(cmd_buf, compute_data.gpu, indirect_dispatch_command)
+            gpu.cmd_dispatch_indirect(cmd_buf, compute_data, indirect_dispatch_command)
         } else {
-            gpu.cmd_dispatch(cmd_buf, compute_data.gpu, num_groups_x, num_groups_y, num_groups_z)
+            gpu.cmd_dispatch(cmd_buf, compute_data, num_groups_x, num_groups_y, num_groups_z)
         }
 
         // Barrier to ensure compute shader finishes before rendering
@@ -230,7 +230,7 @@ main :: proc()
         frag_data.cpu.texture_id = texture_id
         frag_data.cpu.sampler_id = sampler_id
 
-        gpu.cmd_draw_indexed_instanced(cmd_buf, verts_data.gpu, frag_data.gpu, indices_local, u32(len(indices.cpu)), 1)
+        gpu.cmd_draw_indexed(cmd_buf, verts_data, frag_data, indices_local)
         gpu.cmd_end_render_pass(cmd_buf)
         gpu.cmd_add_signal_semaphore(cmd_buf, frame_sem, next_frame)
         gpu.queue_submit(.Main, { cmd_buf })

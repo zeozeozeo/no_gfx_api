@@ -46,7 +46,7 @@ defer {
 
 // --- Issue copy commands to GPU local memory
 upload_cmd_buf := gpu.commands_begin(.Main)
-gpu.cmd_mem_copy(upload_cmd_buf, verts_local, verts, len(verts.cpu))
+gpu.cmd_mem_copy(upload_cmd_buf, verts_local, verts)
 // ...
 gpu.cmd_barrier(upload_cmd_buf, .Transfer, .All, {})
 gpu.queue_submit(.Main, { upload_cmd_buf })
@@ -91,7 +91,7 @@ for true
     verts_data.cpu.verts = verts_local.gpu.ptr
 
     // Just pass pointers to your data!
-    gpu.cmd_draw_indexed_instanced(cmd_buf, verts_data, {}, indices_local, 3, 1)
+    gpu.cmd_draw_indexed(cmd_buf, verts_data, {}, indices_local)
     gpu.cmd_end_render_pass(cmd_buf)
     gpu.queue_submit(.Main, { cmd_buf }, frame_sem, next_frame)
 

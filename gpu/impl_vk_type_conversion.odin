@@ -348,3 +348,13 @@ to_vk_cull_mode :: #force_inline proc(cull_mode: Cull_Mode) -> vk.CullModeFlags
     }
     return {}
 }
+
+to_vk_index_format :: #force_inline proc(index_format: Index_Format) -> vk.IndexType
+{
+    switch index_format
+    {
+        case .U32: return .UINT32
+        case .U16: return .UINT16
+    }
+    return {}
+}

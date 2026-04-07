@@ -72,14 +72,14 @@ main :: proc()
     indices_local := gpu.mem_alloc(u32, 3, gpu.Memory.GPU)
 
     // Unified indirect data struct that extends Draw_Indexed_Indirect_Command
-    IndirectData :: struct {
+    Indirect_Data :: struct {
         using cmd: gpu.Draw_Indexed_Indirect_Command,
         color: [3]f32,
         pos: [3]f32,
         size: f32,
     }
 
-    indirect_data := gpu.mem_alloc(IndirectData, Num_Triangles)
+    indirect_data := gpu.mem_alloc(Indirect_Data, Num_Triangles)
     defer gpu.mem_free(indirect_data)
 
     count := gpu.arena_alloc(&arena, u32)
@@ -105,7 +105,7 @@ main :: proc()
         rgb := hsl_to_rgb(hue, saturation, lightness)
 
         // Fill unified indirect data struct with both command and user data
-        indirect_data.cpu[i] = IndirectData {
+        indirect_data.cpu[i] = Indirect_Data {
             cmd = gpu.Draw_Indexed_Indirect_Command {
                 index_count = 3,
                 instance_count = 1,
@@ -119,7 +119,7 @@ main :: proc()
         }
     }
 
-    indirect_data_local := gpu.mem_alloc(IndirectData, Num_Triangles, gpu.Memory.GPU)
+    indirect_data_local := gpu.mem_alloc(Indirect_Data, Num_Triangles, gpu.Memory.GPU)
 
     defer {
         gpu.mem_free(verts_local)
@@ -129,10 +129,10 @@ main :: proc()
     }
 
     upload_cmd_buf := gpu.commands_begin(.Main)
-    gpu.cmd_mem_copy(upload_cmd_buf, verts_local, verts, len(verts.cpu))
-    gpu.cmd_mem_copy(upload_cmd_buf, indices_local, indices, len(indices.cpu))
+    gpu.cmd_mem_copy(upload_cmd_buf, verts_local, verts)
+    gpu.cmd_mem_copy(upload_cmd_buf, indices_local, indices)
     gpu.cmd_mem_copy(upload_cmd_buf, count_local, count)
-    gpu.cmd_mem_copy(upload_cmd_buf, indirect_data_local, indirect_data, Num_Triangles)
+    gpu.cmd_mem_copy(upload_cmd_buf, indirect_data_local, indirect_data)
     gpu.cmd_barrier(upload_cmd_buf, .Transfer, .All, {})
     gpu.queue_submit(.Main, { upload_cmd_buf })
 
@@ -196,10 +196,10 @@ main :: proc()
             //   indirect_data_local: GPU pointer to array of IndirectData (contains both draw command and per-draw data)
             //   stride: Byte stride between elements in the indirect data array (size of IndirectData struct)
             //   count_local: GPU pointer to u32 containing the number of draws to execute
-            gpu.cmd_draw_indexed_instanced_indirect_multi(cmd_buf, shared_vert_data.gpu, {}, indices_local, indirect_data_local, u32(size_of(IndirectData)), count_local)
+            gpu.cmd_draw_indexed_indirect_multi(cmd_buf, shared_vert_data, {}, indices_local, indirect_data_local, count_local)
         } else {
             // Renders only the first draw from the indirect data buffer
-            gpu.cmd_draw_indexed_instanced_indirect(cmd_buf, shared_vert_data.gpu, {}, indices_local, indirect_data_local)
+            gpu.cmd_draw_indexed_indirect(cmd_buf, shared_vert_data, {}, indices_local, indirect_data_local)
         }
 
         gpu.cmd_end_render_pass(cmd_buf)

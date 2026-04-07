@@ -450,13 +450,11 @@ render_pass_gbuffer :: proc(
 			normal_map_sampler             = sampler_id,
 		}
 
-		gpu.cmd_draw_indexed_instanced(
+		gpu.cmd_draw_indexed(
 			cmd_buf,
-			verts_data.gpu,
-			frag_data.gpu,
+			verts_data,
+			frag_data,
 			mesh.indices,
-			mesh.idx_count,
-			1,
 		)
 	}
 
@@ -515,7 +513,7 @@ render_pass_final :: proc(
 	}
 
 	// Render fullscreen quad
-	gpu.cmd_draw_indexed_instanced(cmd_buf, verts_data.gpu, frag_data.gpu, fsq_indices, 6, 1)
+	gpu.cmd_draw_indexed(cmd_buf, verts_data.gpu, frag_data.gpu, fsq_indices)
 
 	gpu.cmd_end_render_pass(cmd_buf)
 }
@@ -598,7 +596,7 @@ create_magenta_texture :: proc(
 			usage = {.Sampled},
 		},
 	)
-	gpu.cmd_copy_to_texture(cmd_buf, texture, staging, texture.mem)
+	gpu.cmd_copy_to_texture(cmd_buf, texture, staging)
 	return texture
 }
 
@@ -639,13 +637,11 @@ create_fullscreen_quad :: proc(
 		cmd_buf,
 		full_screen_quad_verts_local,
 		fsq_verts,
-		len(fsq_verts.cpu),
 	)
 	gpu.cmd_mem_copy(
 		cmd_buf,
 		full_screen_quad_indices_local,
 		fsq_indices,
-		len(fsq_indices.cpu),
 	)
 
 	return full_screen_quad_verts_local, full_screen_quad_indices_local
@@ -776,7 +772,7 @@ upload_texture :: proc(
 	{
 		// Upload texture to GPU
 		upload_cmd_buf := gpu.commands_begin(.Transfer)
-		gpu.cmd_copy_to_texture(upload_cmd_buf, texture, staging, texture.mem)
+		gpu.cmd_copy_to_texture(upload_cmd_buf, texture, staging)
 		gpu.cmd_add_signal_semaphore(upload_cmd_buf, upload_sem, upload_sem_value_old + 1)
 		gpu.queue_submit(.Transfer, {upload_cmd_buf})
 	}
@@ -792,8 +788,8 @@ upload_texture :: proc(
 			delete(compressed.offsets)
 		}
 
-		staging := gpu.arena_alloc_raw(upload_arena, len(compressed.data), 1, 16)
-		runtime.mem_copy(staging.cpu, raw_data(compressed.data), len(compressed.data))
+		staging := gpu.arena_alloc(upload_arena, u8, len(compressed.data))
+		copy(staging.cpu, compressed.data[:])
 
 		texture = gpu.texture_alloc_and_create(
 			{
@@ -809,23 +805,18 @@ upload_texture :: proc(
 		)
 		append(&loaded_textures, texture)
 
-		regions := make([]gpu.Mip_Copy_Region, int(compressed.mip_count))
-		for mip: u32 = 0; mip < compressed.mip_count; mip += 1 {
-			regions[mip] = {
-				src_offset = compressed.offsets[mip],
-				mip_level = mip,
-				array_layer = 0,
-				layer_count = 1,
-			}
-		}
-
 		upload_cmd_buf := gpu.commands_begin(.Transfer)
         gpu.cmd_barrier(upload_cmd_buf, .Transfer, .Transfer, {})
-		gpu.cmd_copy_mips_to_texture(upload_cmd_buf, texture, staging, regions)
+        for mip in 0..<compressed.mip_count {
+        	gpu.cmd_copy_to_texture(
+        		upload_cmd_buf,
+        		texture,
+        		gpu.subslice(staging, compressed.offsets[mip]),
+        		{ mip_level = mip }
+        	)
+        }
 		gpu.cmd_add_wait_semaphore(upload_cmd_buf, upload_sem, upload_sem_value_old + 1)
 		gpu.queue_submit(.Transfer, {upload_cmd_buf})
-
-		return texture
 	} else {
 		// Generate mipmaps
 		mipmaps_cmd_buf := gpu.commands_begin(.Main)
@@ -849,8 +840,8 @@ upload_bc3_texture :: proc(
 	upload_sem_val += 1
 
     upload_cmd_buf := gpu.commands_begin(.Transfer)
-    staging := gpu.arena_alloc_raw(upload_arena, len(compressed.data), 1, 16)
-    runtime.mem_copy(staging.cpu, raw_data(compressed.data), len(compressed.data))
+    staging := gpu.arena_alloc(upload_arena, u8, len(compressed.data))
+    copy(staging.cpu, compressed.data[:])
 
     texture := gpu.texture_alloc_and_create(
         {
@@ -864,17 +855,14 @@ upload_bc3_texture :: proc(
     )
     append(&loaded_textures, texture)
 
-    regions := make([]gpu.Mip_Copy_Region, int(compressed.mip_count))
-    for mip: u32 = 0; mip < compressed.mip_count; mip += 1 {
-        regions[mip] = {
-            src_offset = compressed.offsets[mip],
-            mip_level = mip,
-            array_layer = 0,
-            layer_count = 1,
-        }
+    for mip in 0..<compressed.mip_count {
+    	gpu.cmd_copy_to_texture(
+    		upload_cmd_buf,
+    		texture,
+    		gpu.subslice(staging, compressed.offsets[mip]),
+    		{ mip_level = mip }
+    	)
     }
-
-    gpu.cmd_copy_mips_to_texture(upload_cmd_buf, texture, staging, regions)
     gpu.cmd_barrier(upload_cmd_buf, .Transfer, .Transfer, {})
     gpu.cmd_add_signal_semaphore(upload_cmd_buf, upload_sem, upload_sem_value_old + 1)
     gpu.queue_submit(.Transfer, {upload_cmd_buf})
@@ -910,10 +898,10 @@ upload_mesh :: proc(upload_arena: ^gpu.Arena, cmd_buf: gpu.Command_Buffer, mesh:
 	res.uvs = gpu.mem_alloc([2]f32, len(mesh.uvs), mem_type = gpu.Memory.GPU)
 	res.indices = gpu.mem_alloc(u32, len(mesh.indices), mem_type = gpu.Memory.GPU)
 	res.idx_count = u32(len(mesh.indices))
-	gpu.cmd_mem_copy(cmd_buf, res.pos,     positions_staging, len(mesh.pos))
-	gpu.cmd_mem_copy(cmd_buf, res.normals, normals_staging,   len(mesh.normals))
-	gpu.cmd_mem_copy(cmd_buf, res.uvs,     uvs_staging,       len(mesh.uvs))
-	gpu.cmd_mem_copy(cmd_buf, res.indices, indices_staging,   len(mesh.indices))
+	gpu.cmd_mem_copy(cmd_buf, res.pos,     positions_staging)
+	gpu.cmd_mem_copy(cmd_buf, res.normals, normals_staging  )
+	gpu.cmd_mem_copy(cmd_buf, res.uvs,     uvs_staging      )
+	gpu.cmd_mem_copy(cmd_buf, res.indices, indices_staging  )
 	return res
 }
 

@@ -60,6 +60,7 @@ Store_Op :: enum { Store = 0, Dont_Care, Resolve, Resolve_And_Store }
 Compare_Op :: enum { Never = 0, Less, Equal, Less_Equal, Greater, Not_Equal, Greater_Equal, Always }
 Blend_Op :: enum { Add, Subtract, Rev_Subtract, Min, Max }
 Blend_Factor :: enum { Zero, One, Src_Color, Dst_Color, Src_Alpha, Dst_Alpha, One_Minus_Src_Alpha, One_Minus_Src_Color, One_Minus_Dst_Alpha, One_Minus_Dst_Color }
+Index_Format :: enum { U32 = 0, U16 }
 Topology :: enum { Triangle_List = 0, Triangle_Strip, Triangle_Fan };
 Cull_Mode :: enum { Cull_CW = 0, Cull_CCW, None, All };
 Depth_Mode :: enum { Read = 0, Write }
@@ -95,19 +96,26 @@ Rect_2D :: struct
     size: [2]u32,
 }
 
+Rect_3D :: struct
+{
+    offset: [3]i32,
+    size: [3]u32,
+}
+
+Texture_Region :: struct
+{
+    rect: Rect_3D,     // rect.size == 0 -> entire size
+    mip_level: u32,
+    base_layer: u32,
+    layer_count: u32,  // 0 = 1
+}
+
 Blit_Rect :: struct
 {
     offset_a: [3]i32,  // offset_a == 0 && offset_b == 0 -> full image
     offset_b: [3]i32,  // offset_a == 0 && offset_b == 0 -> full image
     mip_level: u32,
     base_layer: u32,
-    layer_count: u32,
-}
-
-Mip_Copy_Region :: struct {
-    src_offset:  u64, // Offset in staging buffer
-    mip_level:   u32,
-    array_layer: u32,
     layer_count: u32,
 }
 
@@ -342,8 +350,8 @@ commands_begin: proc(queue: Queue, loc := #caller_location) -> Command_Buffer : 
 
 // Commands
 cmd_mem_copy_raw: proc(cmd_buf: Command_Buffer, dst, src: gpuptr, #any_int bytes: i64, loc := #caller_location) : _cmd_mem_copy_raw
-cmd_copy_to_texture: proc(cmd_buf: Command_Buffer, texture: Texture, src, dst: gpuptr, loc := #caller_location) : _cmd_copy_to_texture
-cmd_copy_mips_to_texture: proc(cmd_buf: Command_Buffer, texture: Texture, src_buffer: gpuptr, regions: []Mip_Copy_Region, loc := #caller_location) : _cmd_copy_mips_to_texture
+cmd_copy_to_texture: proc(cmd_buf: Command_Buffer, dst: Texture, src: gpuptr, region: Texture_Region, loc := #caller_location) : _cmd_copy_to_texture
+// TODO: Missing cmd_copy_from_texture
 cmd_blit_texture: proc(cmd_buf: Command_Buffer, src, dst: Texture, src_rects: []Blit_Rect, dst_rects: []Blit_Rect, filter: Filter, loc := #caller_location) : _cmd_blit_texture
 
 cmd_set_desc_heap: proc(cmd_buf: Command_Buffer, textures, textures_rw, samplers, bvhs: gpuptr, loc := #caller_location) : _cmd_set_desc_heap
@@ -361,38 +369,88 @@ cmd_set_blend_state: proc(cmd_buf: Command_Buffer, state: Blend_State, loc := #c
 cmd_set_viewport: proc(cmd_buf: Command_Buffer, viewport: Viewport, loc := #caller_location) : _cmd_set_viewport
 cmd_set_scissor: proc(cmd_buf: Command_Buffer, scissor: Rect_2D, loc := #caller_location) : _cmd_set_scissor
 
-// Run compute shader based on number of groups
 cmd_dispatch: proc(cmd_buf: Command_Buffer, compute_data: gpuptr, num_groups_x: u32, num_groups_y: u32 = 1, num_groups_z: u32 = 1, loc := #caller_location) : _cmd_dispatch
 
 // Schedule indirect compute shader based on number of groups, arguments is a pointer to a Dispatch_Indirect_Command struct
-cmd_dispatch_indirect: proc(cmd_buf: Command_Buffer, compute_data, arguments: gpuptr, loc := #caller_location) : _cmd_dispatch_indirect
+cmd_dispatch_indirect_raw: proc(cmd_buf: Command_Buffer, compute_data, arguments: gpuptr, loc := #caller_location) : _cmd_dispatch_indirect_raw
 
 cmd_begin_render_pass: proc(cmd_buf: Command_Buffer, desc: Render_Pass_Desc, loc := #caller_location) : _cmd_begin_render_pass
 cmd_end_render_pass: proc(cmd_buf: Command_Buffer, loc := #caller_location) : _cmd_end_render_pass
 
-// Indices, vertex_data and fragment_data can be nil
-cmd_draw_indexed_instanced: proc(cmd_buf: Command_Buffer, vertex_data, fragment_data, indices: gpuptr,
-                                 index_count: u32, instance_count: u32 = 1, loc := #caller_location) : _cmd_draw_indexed_instanced
-cmd_draw_indexed_instanced_indirect: proc(cmd_buf: Command_Buffer, vertex_data, fragment_data, indices,
-                                          indirect_arguments: gpuptr, loc := #caller_location) : _cmd_draw_indexed_instanced_indirect
-cmd_draw_indexed_instanced_indirect_multi: proc(cmd_buf: Command_Buffer, vertex_data, fragment_data, indices: gpuptr,
-                                                indirect_arguments: gpuptr, stride: u32, draw_count: gpuptr, loc := #caller_location) : _cmd_draw_indexed_instanced_indirect_multi
+// Vertex_data and fragment_data can be nil if not used in the currently bound shader
+cmd_draw_indexed_raw: proc(cmd_buf: Command_Buffer, vertex_data, fragment_data, indices: gpuptr,
+                           index_format: Index_Format, index_count: u32, instance_count: u32 = 1, loc := #caller_location) : _cmd_draw_indexed_raw
+cmd_draw_indexed_indirect_raw: proc(cmd_buf: Command_Buffer, vertex_data, fragment_data, indices: gpuptr,
+                                    index_format: Index_Format, indirect_arguments: gpuptr, loc := #caller_location) : _cmd_draw_indexed_indirect_raw
+cmd_draw_indexed_indirect_multi_raw: proc(cmd_buf: Command_Buffer, vertex_data, fragment_data, indices: gpuptr,
+                                          index_format: Index_Format, indirect_arguments: gpuptr, stride: u32, draw_count: gpuptr, loc := #caller_location) : _cmd_draw_indexed_indirect_multi_raw
 
-cmd_build_blas: proc(cmd_buf: Command_Buffer, bvh: BVH, bvh_storage, scratch_storage: gpuptr, shapes: []BVH_Shape, loc := #caller_location) : _cmd_build_blas
-cmd_build_tlas: proc(cmd_buf: Command_Buffer, bvh: BVH, bvh_storage, scratch_storage: gpuptr, instances: gpuptr, loc := #caller_location) : _cmd_build_tlas
+cmd_build_blas: proc(cmd_buf: Command_Buffer, bvh: BVH, scratch_storage: gpuptr, shapes: []BVH_Shape, loc := #caller_location) : _cmd_build_blas
+cmd_build_tlas: proc(cmd_buf: Command_Buffer, bvh: BVH, scratch_storage: gpuptr, instances: gpuptr, loc := #caller_location) : _cmd_build_tlas
 
 /////////////////////////
 // Userland Utilities
 
-// Memory
-
-ptr_apply_offset :: #force_inline proc(addr: ^ptr, #any_int offset: i64)
+// Slice
+// end == -1 means "until the end"
+subslice :: #force_inline proc(s: slice_t($T), #any_int start: i64, #any_int end: i64 = -1) -> slice_t(T)
 {
-    if addr.cpu != nil {
-        addr.cpu = auto_cast(uintptr(addr.cpu) + uintptr(offset))
-    }
-    addr.gpu.ptr = auto_cast(uintptr(addr.gpu.ptr) + uintptr(offset))
+    end_clean := end if end != -1 else i64(len(s.cpu))
+    assert(start >= 0)
+    assert(start < i64(len(s.cpu)))
+    assert(end_clean >= 0)
+    assert(end_clean <= i64(len(s.cpu)))
+    res := s
+    res.cpu = res.cpu[start:end_clean]
+    res.gpu.ptr = rawptr(uintptr(res.gpu.ptr) + uintptr(start * size_of(T)))
+    return res
 }
+
+slice_len :: #force_inline proc(s: slice_t($T)) -> i64
+{
+    return i64(len(s.cpu))
+}
+
+slice_to_ptr :: #force_inline proc(s: slice_t($T)) -> ptr_t(T)
+{
+    return {
+        cpu = raw_data(s.cpu),
+        gpu = s.gpu,
+    }
+}
+
+// Type-safe variants of raw procedures
+cmd_draw_indexed :: #force_inline proc(cmd_buf: Command_Buffer, vertex_data, fragment_data: gpuptr, indices: slice_t($T),
+                                       instance_count: u32 = 1, loc := #caller_location)
+{
+    #assert(T == u32 || T == u16)
+    idx_fmt: Index_Format = .U32 when T == u32 else .U16
+    cmd_draw_indexed_raw(cmd_buf, vertex_data, fragment_data, indices, idx_fmt, u32(slice_len(indices)), instance_count, loc)
+}
+
+cmd_dispatch_indirect :: #force_inline proc(cmd_buf: Command_Buffer, compute_data: gpuptr,
+                                            arguments: ptr_t(Dispatch_Indirect_Command), loc := #caller_location)
+{
+    cmd_dispatch_indirect_raw(cmd_buf, compute_data, arguments, loc)
+}
+
+cmd_draw_indexed_indirect :: #force_inline proc(cmd_buf: Command_Buffer, vertex_data, fragment_data: gpuptr, indices: slice_t($T),
+                                                indirect_arguments: ptr_t($T2), loc := #caller_location)
+{
+    #assert(T == u32 || T == u16)
+    idx_fmt: Index_Format = .U32 when T == u32 else .U16
+    cmd_draw_indexed_indirect_raw(cmd_buf, vertex_data, fragment_data, indices, idx_fmt, indirect_arguments, loc)
+}
+
+cmd_draw_indexed_indirect_multi :: #force_inline proc(cmd_buf: Command_Buffer, vertex_data, fragment_data: gpuptr, indices: slice_t($T),
+                                                      indirect_arguments: slice_t($T2), draw_count: ptr_t(u32), loc := #caller_location)
+{
+    #assert(T == u32 || T == u16)
+    idx_fmt: Index_Format = .U32 when T == u32 else .U16
+    cmd_draw_indexed_indirect_multi_raw(cmd_buf, vertex_data, fragment_data, indices, idx_fmt, indirect_arguments, size_of(T2), draw_count, loc)
+}
+
+// Memory
 
 ptr_t :: struct($T: typeid)
 {
@@ -449,9 +507,9 @@ cmd_mem_copy_ptr :: #force_inline proc(cmd_buf: Command_Buffer, dst: ptr_t($T), 
     cmd_mem_copy_raw(cmd_buf, dst.gpu, src.gpu, size_of(T), loc = loc)
 }
 
-cmd_mem_copy_slice :: proc(cmd_buf: Command_Buffer, dst: slice_t($T), src: slice_t(T), #any_int count: i32, loc := #caller_location)
+cmd_mem_copy_slice :: proc(cmd_buf: Command_Buffer, dst: slice_t($T), src: slice_t(T), loc := #caller_location)
 {
-    cmd_mem_copy_raw(cmd_buf, dst.gpu, src.gpu, size_of(T) * count, loc = loc)
+    cmd_mem_copy_raw(cmd_buf, dst.gpu, src.gpu, size_of(T) * min(slice_len(dst), slice_len(src)), loc = loc)
 }
 
 cmd_mem_copy :: proc {
@@ -735,8 +793,8 @@ Descriptor_Pool :: struct
 }
 
 // Using null descriptors most likely will result in a crash
-// and driver reset. The user can define global resources to
-// be used instead (e.g. a magenta texture).
+// and driver reset. Thus it's useful to be able to define global
+// default resources to be used instead (e.g. a magenta texture).
 desc_pool_create :: proc(#any_int texture_count: i64 = 65535,
                          #any_int texture_rw_count: i64 = 256,
                          #any_int sampler_count: i64 = 256,

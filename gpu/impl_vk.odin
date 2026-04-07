@@ -1326,7 +1326,10 @@ _mem_suballoc :: proc(addr: ptr, offset, el_size, el_count: i64, loc := #caller_
     // TODO: Add suballocation to a suballocation list in allocs.
     // This lets us do bounds checking on arena allocated pointers for example.
     suballoc_p := addr
-    ptr_apply_offset(&suballoc_p, offset)
+    if suballoc_p.cpu != nil {
+        suballoc_p.cpu = auto_cast(uintptr(suballoc_p.cpu) + uintptr(offset))
+    }
+    suballoc_p.gpu.ptr = auto_cast(uintptr(suballoc_p.gpu.ptr) + uintptr(offset))
     return suballoc_p
 }
 
@@ -2080,40 +2083,48 @@ _cmd_mem_copy_raw :: proc(cmd_buf: Command_Buffer, dst, src: gpuptr, #any_int by
     }
 }
 
-// TODO: dst is ignored atm.
-_cmd_copy_to_texture :: proc(cmd_buf: Command_Buffer, texture: Texture, src, dst: gpuptr, loc := #caller_location)
+_cmd_copy_to_texture :: proc(cmd_buf: Command_Buffer, dst: Texture, src: gpuptr, region: Texture_Region = {}, loc := #caller_location)
 {
     if ctx.validation
     {
         ok := true
         ok &= pool_check(&ctx.command_buffers, cmd_buf, "cmd_buf", loc)
+        ok &= pool_check(&ctx.textures, dst.handle, "dst", loc)
         ok &= check_ptr(src, "src", loc)
-        ok &= check_ptr(dst, "dst", loc)
         if !ok do return
     }
 
     cmd_buf_info := pool_get(&ctx.command_buffers, cmd_buf)
-    tex_info := pool_get(&ctx.textures, texture.handle)
-    vk_image := tex_info.handle
+    tex_info := pool_get(&ctx.textures, dst.handle)
 
-    src_buf, src_offset, _ := get_buf_offset_from_gpu_ptr(src)
+    src_buf, src_offset, ok_s := get_buf_offset_from_gpu_ptr(src)
+    assert(ok_s)
 
-    plane_aspect: vk.ImageAspectFlags = { .DEPTH } if texture.format == .D32_Float else { .COLOR }
+    plane_aspect: vk.ImageAspectFlags = { .DEPTH } if dst.format == .D32_Float else { .COLOR }
+    is_compressed := is_block_compressed(dst.format)
 
-    vk.CmdCopyBufferToImage(cmd_buf_info.handle, src_buf, vk_image, .GENERAL, 1, &vk.BufferImageCopy {
+    mip_width := max(1, dst.dimensions.x >> region.mip_level)
+    mip_height := max(1, dst.dimensions.y >> region.mip_level)
+    mip_depth := max(1, dst.dimensions.z >> region.mip_level)
+
+    copy := vk.BufferImageCopy{
         bufferOffset = vk.DeviceSize(src_offset),
-        bufferRowLength = texture.dimensions.x,
-        bufferImageHeight = texture.dimensions.y,
+        bufferRowLength = 0 if is_compressed else mip_width,
+        bufferImageHeight = 0 if is_compressed else mip_height,
         imageSubresource = {
             aspectMask = plane_aspect,
-            mipLevel = 0,
-            baseArrayLayer = 0,
-            layerCount = 1,
+            mipLevel = region.mip_level,
+            baseArrayLayer = region.base_layer,
+            layerCount = max(1, region.layer_count),
         },
         imageOffset = {},
-        imageExtent = { texture.dimensions.x, texture.dimensions.y, texture.dimensions.z }
-    })
+        imageExtent = { mip_width, mip_height, mip_depth },
+    }
+
+    vk.CmdCopyBufferToImage(cmd_buf_info.handle, src_buf, tex_info.handle, .GENERAL, 1, &copy)
 }
+
+// TODO: Missing: cmd_copy_from_texture
 
 _cmd_blit_texture :: proc(cmd_buf: Command_Buffer, src, dst: Texture, src_rects: []Blit_Rect, dst_rects: []Blit_Rect, filter: Filter, loc := #caller_location)
 {
@@ -2178,64 +2189,6 @@ _cmd_blit_texture :: proc(cmd_buf: Command_Buffer, src, dst: Texture, src_rects:
     }
 
     vk.CmdBlitImage(cmd_buf_info.handle, src_info.handle, .GENERAL, dst_info.handle, .GENERAL, u32(len(regions)), raw_data(regions), vk_filter)
-}
-
-_cmd_copy_mips_to_texture :: proc(cmd_buf: Command_Buffer, texture: Texture, src_buffer: gpuptr, regions: []Mip_Copy_Region, loc := #caller_location)
-{
-    if ctx.validation
-    {
-        ok := true
-        ok &= pool_check(&ctx.command_buffers, cmd_buf, "cmd_buf", loc)
-        ok &= pool_check(&ctx.textures, texture.handle, "texture", loc)
-        ok &= check_ptr(src_buffer, "src_buffer", loc)
-        if texture.mip_count < u32(len(regions)) {
-            log.error("'len(regions)' is greater than the available mip count.", location = loc)
-            ok = false
-        }
-        if !ok do return
-    }
-
-    cmd_buf_info := pool_get(&ctx.command_buffers, cmd_buf)
-    tex_info := pool_get(&ctx.textures, texture.handle)
-
-    src_buf, base_offset, ok_s := get_buf_offset_from_gpu_ptr(src_buffer)
-    assert(ok_s)
-
-    plane_aspect: vk.ImageAspectFlags = { .DEPTH } if texture.format == .D32_Float else { .COLOR }
-    is_compressed := is_block_compressed(texture.format)
-
-    scratch, _ := acquire_scratch()
-
-    copies := make([]vk.BufferImageCopy, len(regions), allocator = scratch)
-
-    for region, i in regions {
-        mip_width := max(1, texture.dimensions.x >> region.mip_level)
-        mip_height := max(1, texture.dimensions.y >> region.mip_level)
-        mip_depth := max(1, texture.dimensions.z >> region.mip_level)
-
-        copies[i] = vk.BufferImageCopy{
-            bufferOffset = vk.DeviceSize(u64(base_offset) + region.src_offset),
-            bufferRowLength = 0 if is_compressed else mip_width,
-            bufferImageHeight = 0 if is_compressed else mip_height,
-            imageSubresource = {
-                aspectMask = plane_aspect,
-                mipLevel = region.mip_level,
-                baseArrayLayer = region.array_layer,
-                layerCount = region.layer_count,
-            },
-            imageOffset = {},
-            imageExtent = { mip_width, mip_height, mip_depth },
-        }
-    }
-
-    vk.CmdCopyBufferToImage(
-        cmd_buf_info.handle,
-        src_buf,
-        tex_info.handle,
-        .GENERAL,
-        cast(u32) len(copies),
-        raw_data(copies),
-    )
 }
 
 _cmd_set_desc_heap :: proc(cmd_buf: Command_Buffer, textures, textures_rw, samplers, bvhs: gpuptr, loc := #caller_location)
@@ -2584,7 +2537,7 @@ _cmd_dispatch :: proc(cmd_buf: Command_Buffer, compute_data: gpuptr, num_groups_
     vk.CmdDispatch(vk_cmd_buf, num_groups_x, num_groups_y, num_groups_z)
 }
 
-_cmd_dispatch_indirect :: proc(cmd_buf: Command_Buffer, compute_data, arguments: gpuptr, loc := #caller_location)
+_cmd_dispatch_indirect_raw :: proc(cmd_buf: Command_Buffer, compute_data, arguments: gpuptr, loc := #caller_location)
 {
     if ctx.validation
     {
@@ -2751,8 +2704,8 @@ _cmd_end_render_pass :: proc(cmd_buf: Command_Buffer, loc := #caller_location)
     vk.CmdEndRendering(vk_cmd_buf)
 }
 
-_cmd_draw_indexed_instanced :: proc(cmd_buf: Command_Buffer, vertex_data, fragment_data, indices: gpuptr,
-                                    index_count: u32, instance_count: u32 = 1, loc := #caller_location)
+_cmd_draw_indexed_raw :: proc(cmd_buf: Command_Buffer, vertex_data, fragment_data, indices: gpuptr,
+                              index_format: Index_Format, index_count: u32, instance_count: u32 = 1, loc := #caller_location)
 {
     if ctx.validation
     {
@@ -2761,6 +2714,9 @@ _cmd_draw_indexed_instanced :: proc(cmd_buf: Command_Buffer, vertex_data, fragme
         ok &= check_ptr_allow_nil(vertex_data, "vertex_data", loc)
         ok &= check_ptr_allow_nil(fragment_data, "fragment_data", loc)
         ok &= check_ptr_allow_nil(indices, "indices", loc)
+        if index_count % 3 != 0 {
+            log.errorf("'index_count' must be a multiple of 3.", location = loc)
+        }
         if !ok do return
     }
 
@@ -2777,11 +2733,11 @@ _cmd_draw_indexed_instanced :: proc(cmd_buf: Command_Buffer, vertex_data, fragme
     }
     vk.CmdPushConstants(vk_cmd_buf, ctx.common_pipeline_layout_graphics, { .VERTEX, .FRAGMENT }, 0, size_of(Graphics_Shader_Push_Constants), &push_constants)
 
-    vk.CmdBindIndexBuffer(vk_cmd_buf, indices_buf, vk.DeviceSize(indices_offset), .UINT32)
-    vk.CmdDrawIndexed(vk_cmd_buf, index_count, instance_count, 0, 0, 0)
+    vk.CmdBindIndexBuffer(vk_cmd_buf, indices_buf, vk.DeviceSize(indices_offset), to_vk_index_format(index_format))
+    vk.CmdDrawIndexed(vk_cmd_buf, index_count - (index_count % 3), instance_count, 0, 0, 0)
 }
 
-_cmd_draw_indexed_instanced_indirect :: proc(cmd_buf: Command_Buffer, vertex_data, fragment_data, indices, indirect_arguments: gpuptr, loc := #caller_location)
+_cmd_draw_indexed_indirect_raw :: proc(cmd_buf: Command_Buffer, vertex_data, fragment_data, indices: gpuptr, index_format: Index_Format, indirect_arguments: gpuptr, loc := #caller_location)
 {
     if ctx.validation
     {
@@ -2807,12 +2763,12 @@ _cmd_draw_indexed_instanced_indirect :: proc(cmd_buf: Command_Buffer, vertex_dat
     }
     vk.CmdPushConstants(vk_cmd_buf, ctx.common_pipeline_layout_graphics, { .VERTEX, .FRAGMENT }, 0, size_of(Graphics_Shader_Push_Constants), &push_constants)
 
-    vk.CmdBindIndexBuffer(vk_cmd_buf, indices_buf, vk.DeviceSize(indices_offset), .UINT32)
+    vk.CmdBindIndexBuffer(vk_cmd_buf, indices_buf, vk.DeviceSize(indices_offset), to_vk_index_format(index_format))
     vk.CmdDrawIndexedIndirect(vk_cmd_buf, arguments_buf, vk.DeviceSize(arguments_offset), 1, 0)
 }
 
-_cmd_draw_indexed_instanced_indirect_multi :: proc(cmd_buf: Command_Buffer, vertex_data, fragment_data, indices: gpuptr,
-                                                   indirect_arguments: gpuptr, stride: u32, draw_count: gpuptr, loc := #caller_location)
+_cmd_draw_indexed_indirect_multi_raw :: proc(cmd_buf: Command_Buffer, vertex_data, fragment_data, indices: gpuptr,
+                                             index_format: Index_Format, indirect_arguments: gpuptr, stride: u32, draw_count: gpuptr, loc := #caller_location)
 {
     if ctx.validation
     {
@@ -2844,9 +2800,9 @@ _cmd_draw_indexed_instanced_indirect_multi :: proc(cmd_buf: Command_Buffer, vert
     }
     vk.CmdPushConstants(vk_cmd_buf, ctx.common_pipeline_layout_graphics, { .VERTEX, .FRAGMENT }, 0, size_of(Graphics_Shader_Push_Constants), &push_constants)
 
-    vk.CmdBindIndexBuffer(vk_cmd_buf, indices_buf, vk.DeviceSize(indices_offset), .UINT32)
+    vk.CmdBindIndexBuffer(vk_cmd_buf, indices_buf, vk.DeviceSize(indices_offset), to_vk_index_format(index_format))
 
-    max_draw_count: u32 = 0xFFFFFFFF
+    max_draw_count := max(u32)
     buf_size, ok_size := get_buf_size_from_gpu_ptr(indirect_arguments)
     if ok_size && buf_size > vk.DeviceSize(arguments_offset)
     {
@@ -2857,7 +2813,7 @@ _cmd_draw_indexed_instanced_indirect_multi :: proc(cmd_buf: Command_Buffer, vert
     vk.CmdDrawIndexedIndirectCount(vk_cmd_buf, arguments_buf, vk.DeviceSize(arguments_offset), draw_count_buf, vk.DeviceSize(draw_count_offset), max_draw_count, stride)
 }
 
-_cmd_build_blas :: proc(cmd_buf: Command_Buffer, bvh: BVH, bvh_storage, scratch_storage: gpuptr, shapes: []BVH_Shape, loc := #caller_location)
+_cmd_build_blas :: proc(cmd_buf: Command_Buffer, bvh: BVH, scratch_storage: gpuptr, shapes: []BVH_Shape, loc := #caller_location)
 {
     if ctx.validation
     {
@@ -2931,7 +2887,7 @@ _cmd_build_blas :: proc(cmd_buf: Command_Buffer, bvh: BVH, bvh_storage, scratch_
     vk.CmdBuildAccelerationStructuresKHR(vk_cmd_buf, 1, &build_info, &range_infos_ptr)
 }
 
-_cmd_build_tlas :: proc(cmd_buf: Command_Buffer, bvh: BVH, bvh_storage, scratch_storage, instances: gpuptr, loc := #caller_location)
+_cmd_build_tlas :: proc(cmd_buf: Command_Buffer, bvh: BVH, scratch_storage, instances: gpuptr, loc := #caller_location)
 {
     if ctx.validation
     {

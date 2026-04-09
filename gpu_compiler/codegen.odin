@@ -558,53 +558,7 @@ codegen_expr :: proc(expression: ^Ast_Expr)
             if is_ident
             {
                 text := call_ident.token.text
-                // NOTE: Tried to refactor this by putting this
-                // stuff into separate handwritten GLSL functions,
-                // but that causes the Vulkan drivers to crash on the raytracing example.
-                // So........ be careful about that, I guess.
-                if text == "texture_sample"
-                {
-                    assert(len(expr.args) == 3)
-
-                    write("texture(sampler2D(_res_textures_[nonuniformEXT(")
-                    codegen_expr(expr.args[0])
-                    write(")], _res_samplers_[nonuniformEXT(")
-                    codegen_expr(expr.args[1])
-                    write(")]), ")
-                    codegen_expr(expr.args[2])
-                    write(")")
-
-                    is_intrinsic = true
-                }
-                else if text == "texture_store"
-                {
-                    assert(len(expr.args) == 3)
-
-                    write("imageStore(_res_textures_rw_[nonuniformEXT(")
-                    codegen_expr(expr.args[0])
-                    write(")], ivec2(")
-                    codegen_expr(expr.args[1])
-                    write("), ")
-                    codegen_expr(expr.args[2])
-                    write(")")
-
-                    is_intrinsic = true
-                }
-                else if text == "texture_load"
-                {
-                    assert(len(expr.args) == 2)
-
-                    // For compute shaders, we can use direct indexing without nonuniformEXT
-                    // since we're accessing by index from the data struct
-                    write("imageLoad(_res_textures_rw_[nonuniformEXT(")
-                    codegen_expr(expr.args[0])
-                    write(")], ivec2(")
-                    codegen_expr(expr.args[1])
-                    write("))")
-
-                    is_intrinsic = true
-                }
-                else if text == "printf"
+                if text == "printf"
                 {
                     assert(len(expr.args) >= 1)
 
@@ -1108,10 +1062,10 @@ writer_output_to_file :: proc(path: string)
 Intrinsics_Code :: `
 // Intrinsics:
 
-vec2 texture_size(uint t, uint s, int lod)
-{
-   return textureSize(sampler2D(_res_textures_[nonuniformEXT(t)], _res_samplers_[nonuniformEXT(s)]), lod);
-}
+#define texture_sample(t, s, uv)       texture(sampler2D(_res_textures_[nonuniformEXT(t)], _res_samplers_[nonuniformEXT(s)]), uv)
+#define texture_load(t, coord)         imageLoad(_res_textures_rw_[nonuniformEXT(t)], ivec2(coord))
+#define texture_store(t, coord, value) imageStore(_res_textures_rw_[nonuniformEXT(t)], ivec2(coord), value)
+#define texture_size(t, s, lod)        textureSize(sampler2D(_res_textures_[nonuniformEXT(t)], _res_samplers_[nonuniformEXT(s)]), lod)
 
 // Intrinsics end.
 `

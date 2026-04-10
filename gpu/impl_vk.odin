@@ -2934,6 +2934,59 @@ _cmd_build_tlas :: proc(cmd_buf: Command_Buffer, bvh: BVH, scratch_storage, inst
     vk.CmdBuildAccelerationStructuresKHR(vk_cmd_buf, 1, &build_info, &range_info_ptr)
 }
 
+_cmd_begin_debug_label :: proc(cmd_buf: Command_Buffer, name: string, color: [4]f32, loc := #caller_location)
+{
+    if ctx.validation
+    {
+        ok := true
+        ok &= pool_check(&ctx.command_buffers, cmd_buf, "cmd_buf", loc)
+        if !ok do return
+    }
+
+    scratch, _ := acquire_scratch()
+    name_cstr := strings.clone_to_cstring(name, allocator = scratch)
+
+    vk_cmd_buf := pool_get(&ctx.command_buffers, cmd_buf).handle
+    vk.CmdBeginDebugUtilsLabelEXT(vk_cmd_buf, &vk.DebugUtilsLabelEXT {
+        sType = .DEBUG_UTILS_LABEL_EXT,
+        pLabelName = name_cstr,
+        color = color,
+    })
+}
+
+_cmd_end_debug_label :: proc(cmd_buf: Command_Buffer, loc := #caller_location)
+{
+    if ctx.validation
+    {
+        ok := true
+        ok &= pool_check(&ctx.command_buffers, cmd_buf, "cmd_buf", loc)
+        if !ok do return
+    }
+
+    vk_cmd_buf := pool_get(&ctx.command_buffers, cmd_buf).handle
+    vk.CmdEndDebugUtilsLabelEXT(vk_cmd_buf)
+}
+
+_cmd_insert_debug_label :: proc(cmd_buf: Command_Buffer, name: string, color: [4]f32, loc := #caller_location)
+{
+    if ctx.validation
+    {
+        ok := true
+        ok &= pool_check(&ctx.command_buffers, cmd_buf, "cmd_buf", loc)
+        if !ok do return
+    }
+
+    scratch, _ := acquire_scratch()
+    name_cstr := strings.clone_to_cstring(name, allocator = scratch)
+
+    vk_cmd_buf := pool_get(&ctx.command_buffers, cmd_buf).handle
+    vk.CmdInsertDebugUtilsLabelEXT(vk_cmd_buf, &vk.DebugUtilsLabelEXT {
+        sType = .DEBUG_UTILS_LABEL_EXT,
+        pLabelName = name_cstr,
+        color = color,
+    })
+}
+
 @(private="file")
 vk_check :: proc(result: vk.Result, location := #caller_location)
 {

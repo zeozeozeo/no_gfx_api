@@ -388,6 +388,12 @@ cmd_draw_indexed_indirect_multi_raw: proc(cmd_buf: Command_Buffer, vertex_data, 
 cmd_build_blas: proc(cmd_buf: Command_Buffer, bvh: BVH, scratch_storage: gpuptr, shapes: []BVH_Shape, loc := #caller_location) : _cmd_build_blas
 cmd_build_tlas: proc(cmd_buf: Command_Buffer, bvh: BVH, scratch_storage: gpuptr, instances: gpuptr, loc := #caller_location) : _cmd_build_tlas
 
+// Debug utilities
+cmd_begin_debug_label: proc(cmd_buf: Command_Buffer, name: string, color: [4]f32, loc := #caller_location) : _cmd_begin_debug_label
+cmd_end_debug_label: proc(cmd_buf: Command_Buffer, loc := #caller_location) : _cmd_end_debug_label
+// Shows up as a single event in the debugger
+cmd_insert_debug_label: proc(cmd_buf: Command_Buffer, name: string, color: [4]f32, loc := #caller_location) : _cmd_insert_debug_label
+
 /////////////////////////
 // Userland Utilities
 
@@ -759,6 +765,26 @@ cmd_scoped_render_pass :: #force_inline proc(cmd_buf: Command_Buffer, desc: Rend
 cmd_scoped_render_pass_end :: #force_inline proc(scope_out: Scoped_Render_Pass_Out)
 {
     cmd_end_render_pass(scope_out.cmd_buf, scope_out.loc)
+}
+
+@(private="file")
+Scoped_Debug_Label_Out :: struct
+{
+    cmd_buf: Command_Buffer,
+    loc: runtime.Source_Code_Location,
+}
+
+@(deferred_out = cmd_scoped_debug_label_end)
+cmd_scoped_debug_label :: #force_inline proc(cmd_buf: Command_Buffer, name: string, color: [4]f32, loc := #caller_location) -> Scoped_Debug_Label_Out
+{
+    cmd_begin_debug_label(cmd_buf, name, color, loc)
+    return { cmd_buf, loc }
+}
+
+@(private="file")
+cmd_scoped_debug_label_end :: #force_inline proc(scope_out: Scoped_Debug_Label_Out)
+{
+    cmd_end_debug_label(scope_out.cmd_buf, scope_out.loc)
 }
 
 // Descriptors

@@ -720,7 +720,7 @@ bvh_alloc_build_scratch_buffer :: proc { blas_alloc_build_scratch_buffer, tlas_a
 swapchain_init_from_sdl :: proc(window: ^sdl.Window, frames_in_flight: u32)
 {
     vk_surface: vk.SurfaceKHR
-    ok := sdl.Vulkan_CreateSurface(window, get_vulkan_instance(), nil, &vk_surface)
+    ok := sdl.Vulkan_CreateSurface(window, vk_get_instance(), nil, &vk_surface)
     ensure(ok, "Could not create surface.")
 
     window_size_x: i32

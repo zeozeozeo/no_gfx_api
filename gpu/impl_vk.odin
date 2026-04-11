@@ -3411,38 +3411,38 @@ find_queue_family :: proc(graphics: bool, compute: bool, transfer: bool) -> u32
 
 // Interop
 
-_get_vulkan_instance :: proc() -> vk.Instance
+_vk_get_instance :: proc() -> vk.Instance
 {
     return ctx.instance
 }
 
-_get_vulkan_physical_device :: proc() -> vk.PhysicalDevice
+_vk_get_physical_device :: proc() -> vk.PhysicalDevice
 {
     return ctx.phys_device
 }
 
-_get_vulkan_device :: proc() -> vk.Device
+_vk_get_device :: proc() -> vk.Device
 {
     return ctx.device
 }
 
-_get_vulkan_queue :: proc(queue: Queue) -> vk.Queue
+_vk_get_queue :: proc(queue: Queue) -> vk.Queue
 {
     return ctx.queues[queue].handle
 }
 
-_get_vulkan_queue_family :: proc(queue: Queue) -> u32
+_vk_get_queue_family :: proc(queue: Queue) -> u32
 {
     return ctx.queues[queue].family_idx
 }
 
-_get_vulkan_command_buffer :: proc(cmd_buf: Command_Buffer) -> vk.CommandBuffer
+_vk_get_command_buffer :: proc(cmd_buf: Command_Buffer) -> vk.CommandBuffer
 {
     cmd_buf := pool_get(&ctx.command_buffers, cmd_buf)
     return cmd_buf.handle
 }
 
-_get_swapchain_image_count :: proc() -> u32
+_vk_get_swapchain_image_count :: proc() -> u32
 {
     return u32(len(ctx.swapchain.images))
 }

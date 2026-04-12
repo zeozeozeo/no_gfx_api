@@ -562,7 +562,9 @@ arena_alloc_raw :: proc(arena: ^Arena, #any_int el_size: i64, #any_int el_count:
     assert(arena.block_size > 0, "Arena is not initialized! Did you call arena_init()?")
 
     bytes := el_size * el_count
-    assert(bytes > 0 && align > 0)
+    assert(bytes >= 0 && align > 0)
+
+    if bytes == 0 do return {}
 
     block := arena.blocks[arena.block_idx]
 

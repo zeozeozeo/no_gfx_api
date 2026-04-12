@@ -1255,6 +1255,7 @@ Descriptor_Buffer_Usage :: vk.BufferUsageFlags { .RESOURCE_DESCRIPTOR_BUFFER_EXT
 _mem_alloc_raw :: proc(#any_int el_size, #any_int el_count, #any_int align: i64, mem_type := Memory.Default, alloc_type := Allocation_Type.Default, loc := #caller_location) -> ptr
 {
     bytes := el_size * el_count
+    if bytes == 0 do return {}
 
     vma_usage: vma.Memory_Usage
     properties: vk.MemoryPropertyFlags
@@ -1345,6 +1346,17 @@ _mem_alloc_raw :: proc(#any_int el_size, #any_int el_count, #any_int align: i64,
 
 _mem_suballoc :: proc(addr: ptr, offset, el_size, el_count: i64, loc := #caller_location) -> ptr
 {
+    if ctx.validation
+    {
+        ok := true
+        if el_size * el_count != 0 {
+            ok &= check_ptr(addr, "addr", loc)
+        }
+        if !ok do return {}
+    }
+
+    if el_size * el_count == 0 do return {}
+
     // TODO: Add suballocation to a suballocation list in allocs.
     // This lets us do bounds checking on arena allocated pointers for example.
     suballoc_p := addr
@@ -1360,9 +1372,13 @@ _mem_free_raw :: proc(addr: gpuptr, loc := #caller_location)
     if ctx.validation
     {
         ok := true
-        ok &= check_ptr(addr, "addr", loc)
+        if addr != {} {
+            ok &= check_ptr(addr, "addr", loc)
+        }
         if !ok do return
     }
+
+    if addr == {} do return
 
     alloc := transmute(Alloc_Handle) addr._impl[0]
     alloc_info := pool_get(&ctx.allocs, alloc)
@@ -2121,10 +2137,15 @@ _cmd_mem_copy_raw :: proc(cmd_buf: Command_Buffer, dst, src: gpuptr, #any_int by
     {
         ok := true
         ok &= pool_check(&ctx.command_buffers, cmd_buf, "cmd_buf", loc)
-        ok &= check_ptr_range(dst, bytes, "dst", loc)
-        ok &= check_ptr_range(src, bytes, "src", loc)
+        if bytes > 0
+        {
+            ok &= check_ptr_range(dst, bytes, "dst", loc)
+            ok &= check_ptr_range(src, bytes, "src", loc)
+        }
         if !ok do return
     }
+
+    if bytes == 0 do return
 
     cmd_buf_info := pool_get(&ctx.command_buffers, cmd_buf)
 

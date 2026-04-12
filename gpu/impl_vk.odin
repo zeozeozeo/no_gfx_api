@@ -199,6 +199,14 @@ vk_logger: log.Logger
 @(require_results)
 _init :: proc(validation := true, loc := #caller_location) -> bool
 {
+    // Clear API specific arguments
+    defer {
+        delete(EXTRA_OPT_DEVICE_EXTENSIONS)
+        EXTRA_OPT_DEVICE_EXTENSIONS = {}
+        delete(EXTRA_DEVICE_EXTENSIONS)
+        EXTRA_DEVICE_EXTENSIONS = {}
+    }
+
     scratch, _ := acquire_scratch()
 
     // Load vulkan function pointers
@@ -458,6 +466,14 @@ _init :: proc(validation := true, loc := #caller_location) -> bool
         append(&required_extensions, vk.EXT_SHADER_OBJECT_EXTENSION_NAME)
         append(&required_extensions, vk.EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME)
         append(&required_extensions, vk.KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME)
+        for req_ext in EXTRA_DEVICE_EXTENSIONS {
+            append(&required_extensions, req_ext)
+        }
+
+        optional_extensions := make([dynamic]cstring, allocator = scratch)
+        for opt_ext in EXTRA_OPT_DEVICE_EXTENSIONS {
+            append(&optional_extensions, opt_ext)
+        }
 
         // Check that required extensions are present
         for req in required_extensions {
@@ -477,6 +493,12 @@ _init :: proc(validation := true, loc := #caller_location) -> bool
             append(&required_extensions, vk.KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME)
             append(&required_extensions, vk.KHR_RAY_QUERY_EXTENSION_NAME)
             append(&required_extensions, vk.KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME)
+        }
+
+        for opt in optional_extensions {
+            if supports_device_extension(opt) {
+                append(&required_extensions, opt)
+            }
         }
 
         next: rawptr
@@ -3445,6 +3467,31 @@ _vk_get_command_buffer :: proc(cmd_buf: Command_Buffer) -> vk.CommandBuffer
 _vk_get_swapchain_image_count :: proc() -> u32
 {
     return u32(len(ctx.swapchain.images))
+}
+
+_vk_get_image :: proc(texture: Texture) -> vk.Image
+{
+    image := pool_get(&ctx.textures, texture.handle)
+    return image.handle
+}
+
+_vk_get_buffer :: proc(addr: gpuptr) -> (vk.Buffer, u32)
+{
+    buf, offset, ok := get_buf_offset_from_gpu_ptr(addr)
+    ensure(ok)
+    return buf, offset
+}
+
+@(thread_local) EXTRA_OPT_DEVICE_EXTENSIONS: [dynamic]cstring
+_vk_add_opt_device_extension :: proc(extension: cstring)
+{
+    append(&EXTRA_OPT_DEVICE_EXTENSIONS, extension)
+}
+
+@(thread_local) EXTRA_DEVICE_EXTENSIONS: [dynamic]cstring
+_vk_add_device_extension :: proc(extension: cstring)
+{
+    append(&EXTRA_DEVICE_EXTENSIONS, extension)
 }
 
 @(private)

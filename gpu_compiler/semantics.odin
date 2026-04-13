@@ -175,6 +175,7 @@ typecheck_statement :: proc(using c: ^Checker, statement: ^Ast_Statement)
         case ^Ast_If:
         {
             typecheck_expr(c, stmt.cond)
+            if stmt.cond.type.kind == .Poison do break
 
             if !type_implicit_convert(stmt.cond.type, &BOOL_TYPE) {
                 typecheck_error_mismatching_types(c, stmt.token, stmt.cond.type, &BOOL_TYPE)

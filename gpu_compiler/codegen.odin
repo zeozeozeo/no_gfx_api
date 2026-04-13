@@ -1093,6 +1093,7 @@ Intrinsics_Code :: `
 #define texture_load(t, coord)         imageLoad(_res_textures_rw_[nonuniformEXT(t)], ivec2(coord))
 #define texture_store(t, coord, value) imageStore(_res_textures_rw_[nonuniformEXT(t)], ivec2(coord), value)
 #define texture_size(t, s, lod)        textureSize(sampler2D(_res_textures_[nonuniformEXT(t)], _res_samplers_[nonuniformEXT(s)]), lod)
+#define image_size(t)                  imageSize(_res_textures_rw_[nonuniformEXT(t)])
 
 // Intrinsics end.
 `

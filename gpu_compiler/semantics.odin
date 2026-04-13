@@ -601,6 +601,7 @@ add_intrinsics :: proc()
     add_intrinsic("texture_store", { &TEXTURE_RW_ID_TYPE, &VEC2_TYPE, &VEC4_TYPE }, { "tex_idx", "coord", "value" }, nil)
     add_intrinsic("texture_load", { &TEXTURE_RW_ID_TYPE, &VEC2_TYPE }, { "tex_idx", "coord" }, &VEC4_TYPE)
     add_intrinsic("texture_size", { &TEXTURE_ID_TYPE, &SAMPLER_ID_TYPE, &INT_TYPE }, { "tex_idx", "sampler_idx", "lod" }, &VEC2_TYPE)
+    add_intrinsic("texture_size", { &TEXTURE_RW_ID_TYPE }, { "tex_idx" }, &VEC2_TYPE, glsl_name = "image_size")
 
     // Raytracing
     ray_result_type := add_intrinsic_struct("Ray_Result", { &UINT_TYPE, &FLOAT_TYPE, &UINT_TYPE, &UINT_TYPE, &VEC2_TYPE, &BOOL_TYPE, &MAT4_TYPE, &MAT4_TYPE }, { "kind", "t", "instance_idx", "primitive_idx", "barycentrics", "front_face", "object_to_world", "world_to_object" })

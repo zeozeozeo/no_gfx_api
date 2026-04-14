@@ -72,7 +72,7 @@ pool_check :: proc(pool: ^Resource_Pool($Handle_T, $Info_T), handle: Handle_T, n
     return true
 }
 
-pool_check_no_message :: proc(pool: ^Resource_Pool($Handle_T, $Info_T), handle: Handle_T, name: string, loc: runtime.Source_Code_Location) -> bool
+pool_check_no_message :: proc(pool: ^Resource_Pool($Handle_T, $Info_T), handle: Handle_T) -> bool
 {
     assert(pool.init)
 

@@ -1369,6 +1369,8 @@ _mem_suballoc :: proc(addr: ptr, offset, el_size, el_count: i64, loc := #caller_
 
 _mem_free_raw :: proc(addr: gpuptr, loc := #caller_location)
 {
+    alloc := transmute(Alloc_Handle) addr._impl[0]
+
     if ctx.validation
     {
         ok := true
@@ -1380,7 +1382,6 @@ _mem_free_raw :: proc(addr: gpuptr, loc := #caller_location)
 
     if addr == {} do return
 
-    alloc := transmute(Alloc_Handle) addr._impl[0]
     alloc_info := pool_get(&ctx.allocs, alloc)
     vma.destroy_buffer(ctx.vma_allocator, alloc_info.buf_handle, alloc_info.allocation)
     pool_remove(&ctx.allocs, alloc)
@@ -3617,7 +3618,12 @@ check_ptr :: proc(p: gpuptr, name: string, loc: runtime.Source_Code_Location) ->
         return false
     }
 
-    alloc_info := pool_get(&ctx.allocs, transmute(Alloc_Handle) p._impl[0])
+    alloc_handle := transmute(Alloc_Handle) p._impl[0]
+    if !pool_check_no_message(&ctx.allocs, alloc_handle) {
+        log.errorf("'%v' address is stale, has been freed before.", name, location = loc)
+        return false
+    }
+    alloc_info := pool_get(&ctx.allocs, alloc_handle)
 
     if uintptr(p.ptr) > uintptr(alloc_info.gpu) + uintptr(alloc_info.buf_size) || uintptr(p.ptr) < uintptr(alloc_info.gpu) {
         log.errorf("'%v' address is out of range for the designated allocation. %v bytes were allocated, but you're attempting to access offset %v.",
@@ -3635,7 +3641,12 @@ check_ptr_allow_nil :: proc(p: gpuptr, name: string, loc: runtime.Source_Code_Lo
         return true
     }
 
-    alloc_info := pool_get(&ctx.allocs, transmute(Alloc_Handle) p._impl[0])
+    alloc_handle := transmute(Alloc_Handle) p._impl[0]
+    if !pool_check_no_message(&ctx.allocs, alloc_handle) {
+        log.errorf("'%v' address is stale, has been freed before.", name, location = loc)
+        return false
+    }
+    alloc_info := pool_get(&ctx.allocs, alloc_handle)
 
     if uintptr(p.ptr) > uintptr(alloc_info.gpu) + uintptr(alloc_info.buf_size) || uintptr(p.ptr) < uintptr(alloc_info.gpu) {
         log.errorf("'%v' address is out of range for the designated allocation. %v bytes were allocated, but you're attempting to access offset %v.",
@@ -3654,7 +3665,12 @@ check_ptr_range :: proc(p: gpuptr, #any_int size: i64, name: string, loc: runtim
         return false
     }
 
-    alloc_info := pool_get(&ctx.allocs, transmute(Alloc_Handle) p._impl[0])
+    alloc_handle := transmute(Alloc_Handle) p._impl[0]
+    if !pool_check_no_message(&ctx.allocs, alloc_handle) {
+        log.errorf("'%v' address is stale, has been freed before.", name, location = loc)
+        return false
+    }
+    alloc_info := pool_get(&ctx.allocs, alloc_handle)
 
     if uintptr(p.ptr) + uintptr(size) > uintptr(alloc_info.gpu) + uintptr(alloc_info.buf_size) || uintptr(p.ptr) < uintptr(alloc_info.gpu) {
         log.errorf("'%v' address is out of range for the designated allocation. %v bytes were allocated, but you're attempting to access [%v, %v].",
@@ -3668,7 +3684,7 @@ check_ptr_range :: proc(p: gpuptr, #any_int size: i64, name: string, loc: runtim
 @(private="file")
 check_cmd_buf_has_compute_shader_set :: proc(cmd_buf: Command_Buffer, name: string, loc: runtime.Source_Code_Location) -> bool
 {
-    if !pool_check_no_message(&ctx.command_buffers, cmd_buf, name, loc) do return false
+    if !pool_check_no_message(&ctx.command_buffers, cmd_buf) do return false
 
     cmd_buf_info := pool_get(&ctx.command_buffers, cmd_buf)
 
@@ -3683,7 +3699,7 @@ check_cmd_buf_has_compute_shader_set :: proc(cmd_buf: Command_Buffer, name: stri
 @(private="file")
 check_cmd_buf_must_be_graphics :: proc(cmd_buf: Command_Buffer, name: string, loc: runtime.Source_Code_Location) -> bool
 {
-    if !pool_check_no_message(&ctx.command_buffers, cmd_buf, name, loc) do return false
+    if !pool_check_no_message(&ctx.command_buffers, cmd_buf) do return false
 
     cmd_buf_info := pool_get(&ctx.command_buffers, cmd_buf)
     if cmd_buf_info.queue != .Main {
@@ -3697,7 +3713,7 @@ check_cmd_buf_must_be_graphics :: proc(cmd_buf: Command_Buffer, name: string, lo
 @(private="file")
 check_cmd_buf_must_be_recording :: proc(cmd_buf: Command_Buffer, name: string, loc: runtime.Source_Code_Location) -> bool
 {
-    if !pool_check_no_message(&ctx.command_buffers, cmd_buf, name, loc) do return false
+    if !pool_check_no_message(&ctx.command_buffers, cmd_buf) do return false
 
     cmd_buf_info := pool_get(&ctx.command_buffers, cmd_buf)
     if !cmd_buf_info.recording {

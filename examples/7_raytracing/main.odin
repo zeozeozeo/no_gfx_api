@@ -239,10 +239,13 @@ main :: proc()
             num_groups_y := (u32(window_size_y) + group_size_y - 1) / group_size_y
             num_groups_z := u32(1)
 
+            // Reads and writes into texture_rw_id (allowed if each thread only reads a texel and then writes to that same texel)
             gpu.cmd_dispatch(cmd_buf, compute_data, num_groups_x, num_groups_y, num_groups_z)
 
             // Barrier to ensure compute shader finishes before rendering
             gpu.cmd_barrier(cmd_buf, .Compute, .Fragment_Shader, {})
+            // Next frame's pathtrace invocation will read this frame's output texture
+            gpu.cmd_barrier(cmd_buf, .Compute, .Compute, {})
         }
 
         // Render the texture to the swapchain using a fullscreen quad

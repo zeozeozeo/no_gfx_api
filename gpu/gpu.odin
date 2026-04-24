@@ -353,7 +353,7 @@ commands_begin: proc(queue: Queue, loc := #caller_location) -> Command_Buffer : 
 cmd_mem_copy_raw: proc(cmd_buf: Command_Buffer, dst, src: gpuptr, #any_int bytes: i64, loc := #caller_location) : _cmd_mem_copy_raw
 cmd_copy_to_texture: proc(cmd_buf: Command_Buffer, dst: Texture, src: gpuptr, region: Texture_Region, loc := #caller_location) : _cmd_copy_to_texture
 // TODO: Missing cmd_copy_from_texture
-cmd_blit_texture: proc(cmd_buf: Command_Buffer, src, dst: Texture, src_rects: []Blit_Rect, dst_rects: []Blit_Rect, filter: Filter, loc := #caller_location) : _cmd_blit_texture
+cmd_blit_texture: proc(cmd_buf: Command_Buffer, dst: Texture, dst_rect: Blit_Rect, src: Texture, src_rect: Blit_Rect, filter: Filter, loc := #caller_location) : _cmd_blit_texture
 
 cmd_set_desc_heap: proc(cmd_buf: Command_Buffer, textures, textures_rw, samplers, bvhs: gpuptr, loc := #caller_location) : _cmd_set_desc_heap
 
@@ -747,7 +747,7 @@ cmd_generate_mipmaps :: proc(cmd_buf: Command_Buffer, texture: Texture)
 
         src := Blit_Rect { mip_level = mip - 1 }
         dst := Blit_Rect { mip_level = mip }
-        cmd_blit_texture(cmd_buf, texture, texture, { src }, { dst }, .Linear)
+        cmd_blit_texture(cmd_buf, texture, dst, texture, src, .Linear)
     }
 }
 

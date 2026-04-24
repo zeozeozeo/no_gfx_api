@@ -2237,7 +2237,7 @@ _cmd_copy_to_texture :: proc(cmd_buf: Command_Buffer, dst: Texture, src: gpuptr,
 
 // TODO: Missing: cmd_copy_from_texture
 
-_cmd_blit_texture :: proc(cmd_buf: Command_Buffer, src, dst: Texture, src_rects: []Blit_Rect, dst_rects: []Blit_Rect, filter: Filter, loc := #caller_location)
+_cmd_blit_texture :: proc(cmd_buf: Command_Buffer, dst: Texture, dst_rect: Blit_Rect, src: Texture, src_rect: Blit_Rect, filter: Filter, loc := #caller_location)
 {
     if ctx.validation
     {
@@ -2247,59 +2247,49 @@ _cmd_blit_texture :: proc(cmd_buf: Command_Buffer, src, dst: Texture, src_rects:
         if !ok do return
     }
 
-    assert(len(src_rects) == len(dst_rects))
-
     cmd_buf_info := pool_get(&ctx.command_buffers, cmd_buf)
     src_info := pool_get(&ctx.textures, src.handle)
     dst_info := pool_get(&ctx.textures, dst.handle)
 
     vk_filter := to_vk_filter(filter)
 
-    scratch, _ := acquire_scratch()
-    regions := make([]vk.ImageBlit, len(src_rects), allocator = scratch)
-    for &region, i in regions
-    {
-        src_rect := src_rects[i]
-        dst_rect := dst_rects[i]
+    src_dimensions := [3]i32 { i32(src.dimensions.x), i32(src.dimensions.y), i32(src.dimensions.z) }
+    dst_dimensions := [3]i32 { i32(dst.dimensions.x), i32(dst.dimensions.y), i32(dst.dimensions.z) }
 
-        src_dimensions := [3]i32 { i32(src.dimensions.x), i32(src.dimensions.y), i32(src.dimensions.z) }
-        dst_dimensions := [3]i32 { i32(dst.dimensions.x), i32(dst.dimensions.y), i32(dst.dimensions.z) }
+    src_offsets := [2][3]i32 { src_rect.offset_a, src_rect.offset_b }
+    if src_offsets == ([2][3]i32 { { 0, 0, 0 }, { 0, 0, 0 } }) {
+        src_offsets[1] = get_mip_dimensions_i32(src_dimensions, src_rect.mip_level)
+    }
 
-        src_offsets := [2][3]i32 { src_rect.offset_a, src_rect.offset_b }
-        if src_offsets == ([2][3]i32 { { 0, 0, 0 }, { 0, 0, 0 } }) {
-            src_offsets[1] = get_mip_dimensions_i32(src_dimensions, src_rect.mip_level)
-        }
+    dst_offsets := [2][3]i32 { dst_rect.offset_a, dst_rect.offset_b }
+    if dst_offsets == ([2][3]i32 { { 0, 0, 0 }, { 0, 0, 0 } }) {
+        dst_offsets[1] = get_mip_dimensions_i32(dst_dimensions, dst_rect.mip_level)
+    }
 
-        dst_offsets := [2][3]i32 { dst_rect.offset_a, dst_rect.offset_b }
-        if dst_offsets == ([2][3]i32 { { 0, 0, 0 }, { 0, 0, 0 } }) {
-            dst_offsets[1] = get_mip_dimensions_i32(dst_dimensions, dst_rect.mip_level)
-        }
-
-        region = {
-            srcSubresource = {
-                aspectMask = { .COLOR },
-                mipLevel = src_rect.mip_level,
-                baseArrayLayer = src_rect.base_layer,
-                layerCount = src_rect.layer_count if src_rect.layer_count > 0 else 1,  // TODO
-            },
-            srcOffsets = {
-                { src_offsets[0].x, src_offsets[0].y, src_offsets[0].z },
-                { src_offsets[1].x, src_offsets[1].y, src_offsets[1].z },
-            },
-            dstSubresource = {
-                aspectMask = { .COLOR },
-                mipLevel = dst_rect.mip_level,
-                baseArrayLayer = dst_rect.base_layer,
-                layerCount = dst_rect.layer_count if dst_rect.layer_count > 0 else 1,  // TODO
-            },
-            dstOffsets = {
-                { dst_offsets[0].x, dst_offsets[0].y, dst_offsets[0].z },
-                { dst_offsets[1].x, dst_offsets[1].y, dst_offsets[1].z },
-            }
+    region := vk.ImageBlit {
+        srcSubresource = {
+            aspectMask = { .COLOR },
+            mipLevel = src_rect.mip_level,
+            baseArrayLayer = src_rect.base_layer,
+            layerCount = src_rect.layer_count if src_rect.layer_count > 0 else 1,  // TODO
+        },
+        srcOffsets = {
+            { src_offsets[0].x, src_offsets[0].y, src_offsets[0].z },
+            { src_offsets[1].x, src_offsets[1].y, src_offsets[1].z },
+        },
+        dstSubresource = {
+            aspectMask = { .COLOR },
+            mipLevel = dst_rect.mip_level,
+            baseArrayLayer = dst_rect.base_layer,
+            layerCount = dst_rect.layer_count if dst_rect.layer_count > 0 else 1,  // TODO
+        },
+        dstOffsets = {
+            { dst_offsets[0].x, dst_offsets[0].y, dst_offsets[0].z },
+            { dst_offsets[1].x, dst_offsets[1].y, dst_offsets[1].z },
         }
     }
 
-    vk.CmdBlitImage(cmd_buf_info.handle, src_info.handle, .GENERAL, dst_info.handle, .GENERAL, u32(len(regions)), raw_data(regions), vk_filter)
+    vk.CmdBlitImage(cmd_buf_info.handle, src_info.handle, .GENERAL, dst_info.handle, .GENERAL, 1, &region, vk_filter)
 }
 
 _cmd_set_desc_heap :: proc(cmd_buf: Command_Buffer, textures, textures_rw, samplers, bvhs: gpuptr, loc := #caller_location)

@@ -355,7 +355,7 @@ _init :: proc(validation := true, loc := #caller_location) -> bool
 
         count: u32
         vk.EnumerateDeviceExtensionProperties(ctx.phys_device, nil, &count, nil)
-        extensions := make([]vk.ExtensionProperties, count)
+        extensions := make([]vk.ExtensionProperties, count, allocator = scratch)
         vk.EnumerateDeviceExtensionProperties(ctx.phys_device, nil, &count, raw_data(extensions))
 
         for required_ext in raytracing_extensions
@@ -888,6 +888,8 @@ _cleanup :: proc(loc := #caller_location)
                     buffers := make([dynamic]vk.CommandBuffer, len(tls_context.buffers[type]), scratch)
                     for buf in tls_context.buffers[type] {
                         cmd_buf_info := pool_get(&ctx.command_buffers, buf)
+                        delete(cmd_buf_info.wait_sems)
+                        delete(cmd_buf_info.signal_sems)
                         append(&buffers, cmd_buf_info.handle)
                     }
 
@@ -918,6 +920,7 @@ _cleanup :: proc(loc := #caller_location)
     for &layout in ctx.desc_layouts {
         vk.DestroyDescriptorSetLayout(ctx.device, layout, nil)
     }
+    delete(ctx.desc_layouts)
 
     vk.DestroyPipelineLayout(ctx.device, ctx.common_pipeline_layout_graphics, nil)
     vk.DestroyPipelineLayout(ctx.device, ctx.common_pipeline_layout_compute, nil)
@@ -3237,7 +3240,11 @@ destroy_swapchain :: proc(swapchain: ^Swapchain)
     delete(swapchain.image_views)
     vk.DestroySwapchainKHR(ctx.device, swapchain.handle, nil)
 
-    for handle in swapchain.texture_handles {
+    for handle in swapchain.texture_handles
+    {
+        tex_info := pool_get(&ctx.textures, handle)
+        // Vulkan objects for views are already destroyed by destroying swapchain.image_views
+        delete(tex_info.views)
         pool_remove(&ctx.textures, handle)
     }
     delete(swapchain.texture_handles)

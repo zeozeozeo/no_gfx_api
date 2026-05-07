@@ -958,6 +958,7 @@ parse_postfix_expr :: proc(using p: ^Parser) -> ^Ast_Expr
             {
                 call := make_expr(p, Ast_Call)
                 call.target = expr
+                cast_expr := make_expr(p, Ast_Cast)
                 at += 1
 
                 if tokens[at].type != .RParen
@@ -979,6 +980,34 @@ parse_postfix_expr :: proc(using p: ^Parser) -> ^Ast_Expr
                 required_token(p, .RParen)
 
                 expr = call
+
+                // Check if this call is actually a cast operation.
+                if len(call.args) == 1
+                {
+                    target, is_ident := call.target.derived_expr.(^Ast_Ident_Expr)
+                    if is_ident
+                    {
+                        cast_to: ^Ast_Type
+                        switch target.token.text
+                        {
+                            case "float": cast_to = &FLOAT_TYPE
+                            case "uint":  cast_to = &UINT_TYPE
+                            case "int":   cast_to = &INT_TYPE
+                            case "vec2":  cast_to = &VEC2_TYPE
+                            case "vec3":  cast_to = &VEC3_TYPE
+                            case "vec4":  cast_to = &VEC4_TYPE
+                            case "bool":  cast_to = &BOOL_TYPE
+                            case "mat4":  cast_to = &MAT4_TYPE
+                        }
+
+                        if cast_to != nil
+                        {
+                            cast_expr.cast_to = cast_to
+                            cast_expr.expr = call.args[0]
+                            expr = cast_expr
+                        }
+                    }
+                }
             }
             case .LBracket:
             {

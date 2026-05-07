@@ -48,8 +48,7 @@ typecheck_ast :: proc(ast: ^Ast, file: File, allocator: runtime.Allocator) -> bo
                     resolve_type(&c, member.type)
                 }
 
-                if len(decl.type.members) == 0
-                {
+                if len(decl.type.members) == 0 {
                     typecheck_error(&c, decl.token, "Empty structs aren't allowed.")
                 }
             }
@@ -418,31 +417,8 @@ typecheck_expr :: proc(using c: ^Checker, expression: ^Ast_Expr)
                 if arg.type.kind == .Poison do break expr_switch
             }
 
-            target, is_ident := expr.target.derived_expr.(^Ast_Ident_Expr)
-
-            // Handle cast-like constructors
-            if is_ident && len(expr.args) == 1
-            {
-                cast_to: ^Ast_Type
-                switch target.token.text
-                {
-                    case "uint":  cast_to = &UINT_TYPE
-                    case "int":   cast_to = &INT_TYPE
-                    case "float": cast_to = &FLOAT_TYPE
-                    case "bool":  cast_to = &BOOL_TYPE
-                }
-
-                if cast_to != nil
-                {
-                    if !type_cast_allowed(expr.args[0].type, cast_to) {
-                        typecheck_error(c, expr.args[0].token, "Cast not allowed for these types: from '%v' to '%v'.", type_to_string(expr.args[0].type, arena = scratch), type_to_string(cast_to, arena = scratch))
-                    }
-                    expr.type = cast_to
-                    break
-                }
-            }
-
             // Handle intrinsics
+            target, is_ident := expr.target.derived_expr.(^Ast_Ident_Expr)
             if is_ident
             {
                 found, ok_l := intrinsic_lookup(c, target.token, expr.args)
@@ -729,14 +705,10 @@ add_intrinsics :: proc()
     add_intrinsic("float_bits_to_int", { &FLOAT_TYPE }, { "x" }, &UINT_TYPE, glsl_name = "floatBitsToInt")
 
     // Constructors
-    add_intrinsic("vec2", { &FLOAT_TYPE }, { "x" }, &VEC2_TYPE)
     add_intrinsic("vec2", { &FLOAT_TYPE, &FLOAT_TYPE }, { "x", "y" }, &VEC2_TYPE)
-    add_intrinsic("vec2", { &VEC2_TYPE }, { "x" }, &VEC2_TYPE)
     add_intrinsic("vec3", { &FLOAT_TYPE, &FLOAT_TYPE, &FLOAT_TYPE }, { "x", "y", "z" }, &VEC3_TYPE)
     add_intrinsic("vec3", { &VEC2_TYPE, &FLOAT_TYPE }, { "x", "y" }, &VEC3_TYPE)
     add_intrinsic("vec3", { &FLOAT_TYPE, &VEC2_TYPE }, { "x", "y" }, &VEC3_TYPE)
-    add_intrinsic("vec3", { &FLOAT_TYPE }, { "x" }, &VEC3_TYPE)
-    add_intrinsic("vec3", { &VEC3_TYPE }, { "x" }, &VEC3_TYPE)
     add_intrinsic("vec4", { &FLOAT_TYPE, &FLOAT_TYPE, &FLOAT_TYPE, &FLOAT_TYPE }, { "x", "y", "z", "w" }, &VEC4_TYPE)
     add_intrinsic("vec4", { &VEC3_TYPE, &FLOAT_TYPE }, { "x", "y" }, &VEC4_TYPE)
     add_intrinsic("vec4", { &FLOAT_TYPE, &VEC3_TYPE }, { "x", "y" }, &VEC4_TYPE)
@@ -744,7 +716,6 @@ add_intrinsics :: proc()
     add_intrinsic("vec4", { &FLOAT_TYPE, &FLOAT_TYPE, &VEC2_TYPE }, { "x", "y", "z" }, &VEC4_TYPE)
     add_intrinsic("vec4", { &VEC2_TYPE, &FLOAT_TYPE, &FLOAT_TYPE }, { "x", "y", "z" }, &VEC4_TYPE)
     add_intrinsic("vec4", { &FLOAT_TYPE, &VEC2_TYPE, &FLOAT_TYPE }, { "x", "y", "z" }, &VEC4_TYPE)
-    add_intrinsic("vec4", { &FLOAT_TYPE }, { "x" }, &VEC4_TYPE)
     add_intrinsic("mat4", { &VEC4_TYPE, &VEC4_TYPE, &VEC4_TYPE, &VEC4_TYPE }, { "x", "y", "z", "w" }, &MAT4_TYPE)
 
     // Math functions - these work on float, vec2, vec3, vec4 (component-wise)
@@ -1031,6 +1002,15 @@ type_cast_allowed :: proc(from: ^Ast_Type, to: ^Ast_Type) -> bool
     if type_implicit_convert(from, &BOOL_TYPE) && type_implicit_convert(to, &UINT_TYPE) {
         return true
     }
+    if type_implicit_convert(from, &FLOAT_TYPE) && type_implicit_convert(to, &VEC2_TYPE) {
+        return true
+    }
+    if type_implicit_convert(from, &FLOAT_TYPE) && type_implicit_convert(to, &VEC3_TYPE) {
+        return true
+    }
+    if type_implicit_convert(from, &FLOAT_TYPE) && type_implicit_convert(to, &VEC4_TYPE) {
+        return true
+    }
 
     for i in 0..<2
     {
@@ -1041,12 +1021,6 @@ type_cast_allowed :: proc(from: ^Ast_Type, to: ^Ast_Type) -> bool
             return true
         }
         if type_implicit_convert(t1, &FLOAT_TYPE) && type_implicit_convert(t2, &UINT_TYPE) {
-            return true
-        }
-        if type_implicit_convert(t1, &VEC2_TYPE) && type_implicit_convert(t2, &VEC4_TYPE) {
-            return true
-        }
-        if type_implicit_convert(t1, &VEC3_TYPE) && type_implicit_convert(t2, &VEC4_TYPE) {
             return true
         }
     }

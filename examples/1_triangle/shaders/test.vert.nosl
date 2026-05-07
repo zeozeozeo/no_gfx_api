@@ -7,7 +7,7 @@ Vertex :: struct
 
 Data :: struct
 {
-    verts: mut[]Vertex,
+    verts: []Vertex,
 }
 
 Output :: struct

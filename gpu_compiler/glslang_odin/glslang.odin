@@ -18,6 +18,20 @@ when ODIN_OS == .Windows
         "libs/SPIRV.lib",
     }
 }
+else when ODIN_OS == .Linux
+{
+    @(extra_linker_flags = "-lstdc++")
+    foreign import glslang {
+        "libs/libGenericCodeGen.a",
+        "libs/libglslang-default-resource-limits.a",
+        "libs/libglslang.a",
+        "libs/libMachineIndependent.a",
+        "libs/libSPIRV-Tools-opt.a",
+        "libs/libSPIRV-Tools.a",
+        "libs/libSPIRV.a",
+    }
+}
+else do #panic("OS not supported.")
 
 // Procs
 

@@ -59,8 +59,8 @@ main :: proc()
     depth_texture := gpu.texture_alloc_and_create(depth_desc)
     defer gpu.texture_free_and_destroy(&depth_texture)
 
-    vert_shader := gpu.shader_create(#load("shaders/test.vert.spv", []u32), .Vertex)
-    frag_shader := gpu.shader_create(#load("shaders/test.frag.spv", []u32), .Fragment)
+    vert_shader := gpu.shader_create(#load("shaders/shader.vert.spv", []u32), .Vertex)
+    frag_shader := gpu.shader_create(#load("shaders/shader.frag.spv", []u32), .Fragment)
     defer {
         gpu.shader_destroy(vert_shader)
         gpu.shader_destroy(frag_shader)

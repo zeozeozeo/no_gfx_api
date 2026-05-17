@@ -60,8 +60,8 @@ main :: proc()
 
     group_size_x := u32(8)
     group_size_y := u32(8)
-    vert_shader := gpu.shader_create(#load("shaders/test.vert.spv", []u32), .Vertex)
-    frag_shader := gpu.shader_create(#load("shaders/test.frag.spv", []u32), .Fragment)
+    vert_shader := gpu.shader_create(#load("shaders/shader.vert.spv", []u32), .Vertex)
+    frag_shader := gpu.shader_create(#load("shaders/shader.frag.spv", []u32), .Fragment)
     pathtrace_shader := gpu.shader_create_compute(#load("shaders/pathtracer.comp.spv", []u32), group_size_x, group_size_y, 1)
     defer {
         gpu.shader_destroy(vert_shader)

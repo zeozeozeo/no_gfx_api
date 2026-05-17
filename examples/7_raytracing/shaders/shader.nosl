@@ -1,12 +1,38 @@
 
-Data :: struct
+Vertex :: struct
+{
+    pos: vec3,
+    uv: vec2,
+}
+
+Vert_Data :: struct
+{
+    verts: []Vertex,
+}
+
+Vert_Output :: struct
+{
+    pos: vec4 @position,
+    uv: vec2 @io(0),
+}
+
+vert :: #vertex (vert_id: uint @vert_id, data: ^Vert_Data @data) -> Vert_Output
+{
+    out: Vert_Output;
+    out.pos = vec4(data.verts[vert_id].pos.xyz, 1.0);
+    out.uv = data.verts[vert_id].uv;
+    return out;
+}
+
+Frag_Data :: struct
 {
     texture: texture_id,
     sampler: sampler_id,
 }
 
-main :: (uv: vec2 @input(0), data: ^Data @data) -> vec4 @output(0)
+frag :: #fragment (input: Vert_Output, data: ^Frag_Data @data) -> vec4 @io(0)
 {
+    uv := input.uv;
     linear := texture_sample(data.texture, data.sampler, uv);
     return linear_to_srgb(hdr_to_ldr(max(vec4(0, 0, 0, 0), linear)));
 }

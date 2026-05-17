@@ -23,15 +23,15 @@ IndirectData :: struct
     size: float,
 }
 
-Output :: struct
+Vert_Output :: struct
 {
     pos: vec4 @position,
-    color: vec4 @output(0),
+    color: vec4 @io(0),
 }
 
-main :: (vert_id: uint @vert_id, data: ^Data @data, indirect_data: ^IndirectData @indirect_data) -> Output
+vert :: #vertex (vert_id: uint @vert_id, data: ^Data @data, indirect_data: ^IndirectData @indirect_data) -> Vert_Output
 {
-    out: Output;
+    out: Vert_Output;
 
     // vertices are shared between all draws so we use `data` to access them
     // Scale vertices by size and translate by position
@@ -41,4 +41,9 @@ main :: (vert_id: uint @vert_id, data: ^Data @data, indirect_data: ^IndirectData
     out.color = vec4(indirect_data.color, 1.0);
 
     return out;
+}
+
+frag :: #fragment (input: Vert_Output) -> vec4 @io(0)
+{
+    return input.color;
 }

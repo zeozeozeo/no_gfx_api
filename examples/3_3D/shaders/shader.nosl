@@ -9,13 +9,13 @@ Data :: struct
     view_to_proj: mat4,
 }
 
-Output :: struct
+Vert_Output :: struct
 {
     pos: vec4 @position,
-    color: vec4 @output(0),
+    world_normal: vec4 @io(0),
 }
 
-main :: (vert_id: uint @vert_id, data: ^Data @data) -> Output
+vert :: #vertex (vert_id: uint @vert_id, data: ^Data @data) -> Vert_Output
 {
     clip_pos := vec4(data.positions[vert_id].xyz, 1.0);
     clip_pos = data.model_to_world * clip_pos;
@@ -25,8 +25,15 @@ main :: (vert_id: uint @vert_id, data: ^Data @data) -> Output
 
     world_normal := data.model_to_world_normal * data.normals[vert_id];
 
-    out: Output;
+    out: Vert_Output;
     out.pos = clip_pos;
-    out.color = world_normal;
+    out.world_normal = world_normal;
     return out;
+}
+
+frag :: #fragment (input: Vert_Output) -> vec4 @io(0)
+{
+    world_normal_vert := input.world_normal;
+    normal := normalize(world_normal_vert.xyz);
+    return vec4(normal * 0.5 + 0.5, 1.0);
 }

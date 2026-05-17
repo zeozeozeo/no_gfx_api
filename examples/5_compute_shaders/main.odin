@@ -51,9 +51,9 @@ main :: proc()
 
     group_size_x := u32(8)
     group_size_y := u32(8)
-    compute_shader := gpu.shader_create_compute(#load("shaders/test.comp.spv", []u32), group_size_x, group_size_y, 1)
-    vert_shader := gpu.shader_create(#load("shaders/test.vert.spv", []u32), .Vertex)
-    frag_shader := gpu.shader_create(#load("shaders/test.frag.spv", []u32), .Fragment)
+    compute_shader := gpu.shader_create_compute(#load("shaders/shadertoy.comp.spv", []u32), group_size_x, group_size_y, 1)
+    vert_shader := gpu.shader_create(#load("shaders/shader.vert.spv", []u32), .Vertex)
+    frag_shader := gpu.shader_create(#load("shaders/shader.frag.spv", []u32), .Fragment)
     defer {
         gpu.shader_destroy(compute_shader)
         gpu.shader_destroy(vert_shader)

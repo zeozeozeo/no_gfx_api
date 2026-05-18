@@ -19,9 +19,11 @@ import glslang "glslang_odin"
 Options :: struct
 {
     file: ^os.File `args:"pos=0,required,file=r" usage:"Input file."`,
-    out: string `args:"pos=1" usage:"Output file. Default: 'output(.entry_name)'. Can omit extension."`,
+    out: string `args:"pos=1" usage:"Output file. Default: 'output(.entry_name)'. Can omit '.spv' extension."`,
     print_glsl: bool `usage:"Print transpiled GLSL output."`,
 }
+
+MAX_FILES :: 100
 
 main :: proc()
 {
@@ -59,23 +61,50 @@ main :: proc()
 
     output_prefix := strings.concatenate({ fp.dir(opt.out), "/", fp.short_stem(opt.out) }, allocator = perm_arena)
 
-    file_content, ok := load_file_and_null_terminate(input_path, allocator = perm_arena)
-    if !ok
+    parse_tasks: [dynamic; MAX_FILES]Parse_Task
+    append(&parse_tasks, Parse_Task { file = { filename = input_path }, parsed = false, ast = {}})
+
+    ok_parse := true
+    for true
     {
-        fmt.println("Error: Failed to read file.")
+        all_done := true
+        for &task in parse_tasks
+        {
+            if !task.parsed
+            {
+                if !task.loaded
+                {
+                    file_content, ok := load_file_and_null_terminate(task.file.filename, allocator = perm_arena)
+                    if !ok
+                    {
+                        fmt.printfln("Error: Failed to read file '%v'.", task.file.filename)
+                        os.exit(1)
+                    }
+                    task.file.content = file_content
+                    task.loaded = true
+                }
+
+                tokens := lex_file(task.file, allocator = perm_arena)
+                ast, ok_p := parse_file(task.file, tokens, shader_stage_hint, &parse_tasks, allocator = perm_arena)
+                if !ok_p do ok_parse = false
+
+                task.parsed = true
+                task.ast = ast
+                all_done = false
+            }
+        }
+
+        if all_done do break
+    }
+    if !ok_parse do os.exit(1)
+
+    if !typecheck_files(&parse_tasks, allocator = perm_arena) {
         os.exit(1)
     }
 
-    file := File { input_path, file_content }
+    glsl_source := codegen(parse_tasks[0].ast, input_path)
 
-    tokens := lex_file(file, allocator = perm_arena)
-    ast, ok_p := parse_file(file, tokens, shader_stage_hint, allocator = perm_arena)
-    if !ok_p do os.exit(1)
-    ok_t := typecheck_ast(&ast, file, allocator = perm_arena)
-    if !ok_t do os.exit(1)
-    glsl_source := codegen(ast, input_path)
-
-    ok_c := output_all_spirv_files(glsl_source, input_path, output_prefix, ast, shader_stage_hint)
+    ok_c := output_all_spirv_files(glsl_source, input_path, output_prefix, parse_tasks[0].ast, shader_stage_hint)
     if !ok_c do os.exit(1)
 
     if opt.print_glsl {
@@ -83,6 +112,14 @@ main :: proc()
     }
 
     fmt.println(input_path)
+}
+
+Parse_Task :: struct
+{
+    file: File,
+    loaded: bool,
+    parsed: bool,
+    ast: Ast,
 }
 
 load_file_and_null_terminate :: proc(path: string, allocator: runtime.Allocator) -> ([]u8, bool)

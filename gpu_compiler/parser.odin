@@ -10,6 +10,8 @@ import "core:slice"
 import intr "base:intrinsics"
 import str "core:strings"
 import "core:fmt"
+import fp "core:path/filepath"
+import "core:os"
 
 Lang_Feature :: enum { Raytracing }
 Lang_Features :: bit_set[Lang_Feature; u32]
@@ -29,10 +31,16 @@ Ast :: struct
     procs: [dynamic]^Ast_Proc_Def,
     global_vars: [dynamic]^Ast_Define_Var,
 
-    import_paths: [dynamic]string,  // fullpath
+    imports: [dynamic]Ast_Import,
 
     // Filled in by typechecker
     used_features: Lang_Features,
+}
+
+Ast_Import :: struct
+{
+    module_name: string,
+    info: ^Parse_Task,
 }
 
 Ast_Node :: struct
@@ -375,7 +383,7 @@ Ast_Type :: struct
     dimensions: [2]u32,
 }
 
-parse_file :: proc(file: File, tokens: []Token, stage_hint: Shader_Stage, allocator: runtime.Allocator) -> (Ast, bool)
+parse_file :: proc(file: File, tokens: []Token, stage_hint: Shader_Stage, parse_tasks: ^[dynamic; MAX_FILES]Parse_Task, allocator: runtime.Allocator) -> (Ast, bool)
 {
     context.allocator = allocator
 
@@ -383,6 +391,7 @@ parse_file :: proc(file: File, tokens: []Token, stage_hint: Shader_Stage, alloca
         tokens = tokens,
         file = file,
         stage_hint = stage_hint,
+        parse_tasks = parse_tasks,
     }
     ast := _parse_file(&parser)
     return ast, !parser.error
@@ -395,6 +404,7 @@ Parser :: struct
     at: u32,
     error: bool,
     stage_hint: Shader_Stage,
+    parse_tasks: ^[dynamic; MAX_FILES]Parse_Task,
 
     scope: ^Ast_Scope,
     used_types: [dynamic]Ast_Type,
@@ -428,7 +438,25 @@ _parse_file :: proc(using p: ^Parser) -> Ast
 
                 import_path := tokens[at]
                 required_token(p, .StrLit)
-                append(&ast.import_paths, import_path.text)
+
+                // Build import path
+                import_fullpath := str.concatenate({ fp.dir(file.filename), "/", import_path.text }, allocator = context.allocator)
+                cleaned, err := os.clean_path(import_fullpath, allocator = context.allocator)
+                ensure(err == nil)
+
+                if !os.exists(cleaned)
+                {
+                    parse_error_on_token(p, import_path, "'%v' file does not exist.", cleaned)
+                }
+                else
+                {
+                    append(parse_tasks, Parse_Task { file = { filename = cleaned }, parsed = false })
+                    to_append := Ast_Import {
+                        module_name = cleaned,
+                        info = &parse_tasks[len(parse_tasks)-1]
+                    }
+                    append(&ast.imports, to_append)
+                }
             }
             case .Ident:
             {

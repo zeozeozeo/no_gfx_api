@@ -8,6 +8,18 @@ import "base:runtime"
 import "core:fmt"
 import str "core:strings"
 
+typecheck_files :: proc(parse_tasks: ^[dynamic; MAX_FILES]Parse_Task, allocator: runtime.Allocator) -> bool
+{
+    add_intrinsics()
+
+    res := true
+    for &task in parse_tasks {
+        res &= typecheck_ast(&task.ast, task.file, allocator)
+    }
+
+    return res
+}
+
 typecheck_ast :: proc(ast: ^Ast, file: File, allocator: runtime.Allocator) -> bool
 {
     context.allocator = allocator
@@ -20,8 +32,6 @@ typecheck_ast :: proc(ast: ^Ast, file: File, allocator: runtime.Allocator) -> bo
         cur_proc = nil,
         proc_ret = nil,
     }
-
-    add_intrinsics()
 
     for decl in ast.scope.decls
     {

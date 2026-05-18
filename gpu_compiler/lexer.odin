@@ -411,12 +411,14 @@ error_msg :: proc(file: File, token: Token, fmt_str: string, args: ..any)
     offset_end := token.offset
     for
     {
-        if offset_end >= u32(len(file.content)) || is_newline(file.content[offset_end + 1]) {
+        if offset_end+1 >= u32(len(file.content)) || is_newline(file.content[offset_end + 1]) {
             break
         }
 
         offset_end += 1
     }
+
+    if len(token.text) == 0 do return
 
     loc := string(file.content[offset_begin:offset_end+1])
     fmt.println(loc)

@@ -3564,6 +3564,11 @@ _vk_add_device_extension :: proc(extension: cstring)
     append(&EXTRA_DEVICE_EXTENSIONS, extension)
 }
 
+_vk_move_semaphore :: proc(semaphore: vk.Semaphore, loc := #caller_location) -> Semaphore
+{
+    return pool_add(&ctx.semaphores, semaphore, { name = "", created_at = loc })
+}
+
 @(private)
 to_vk_render_attachment :: #force_inline proc(attach: Render_Attachment) -> vk.RenderingAttachmentInfo
 {

@@ -16,3 +16,6 @@ vk_get_buffer: proc(addr: gpuptr) -> (vk.Buffer, u32) : _vk_get_buffer
 // To be called before gpu.init(). These extra arguments are thread-local.
 vk_add_opt_device_extension: proc(extension: cstring) : _vk_add_opt_device_extension
 vk_add_device_extension: proc(extension: cstring) : _vk_add_device_extension
+
+// NOTE: vk_move_* type procedures move ownership to no_gfx, handles MUST ONLY be destroyed on the no_gfx side.
+vk_move_semaphore: proc(semaphore: vk.Semaphore, loc := #caller_location) -> Semaphore : _vk_move_semaphore

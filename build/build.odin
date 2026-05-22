@@ -69,13 +69,8 @@ cmd_build_example_shaders_nosl :: proc(example: Example) -> bool
     for shader in example.shaders_nosl
     {
         dir, _ := os.split_path(shader)
-        glsl_path := fmt.tprintf("%v/%v.glsl", dir, os.stem(shader))
-        spv_path  := fmt.tprintf("%v/%v.spv",  dir, os.stem(shader))
-        if run_task(with_exe_ext("./build/gpu_compiler"), shader) {
-            res &= run_task("glslangValidator", "-V", glsl_path, "-o", spv_path)
-        } else {
-            res = false
-        }
+        out_flag := fmt.tprintf("-out:%v/%v.spv",  dir, os.stem(shader))
+        res &= run_task(with_exe_ext("./build/gpu_compiler"), shader, out_flag)
     }
     return res
 }
@@ -391,10 +386,10 @@ change_working_dir_to_project_root :: proc()
     ensure(err_a == nil)
 
     // "odin run" creates an .exe at the current working directory, so support that case as well.
-    exe_dir := path.dir(exe_path_abs, allocator = context.temp_allocator)
+    exe_dir := path.dir(exe_path_abs)
     if os.stem(exe_dir) == "build"
     {
-        root_dir := path.dir(exe_dir, allocator = context.temp_allocator)
+        root_dir := path.dir(exe_dir)
         os.chdir(root_dir)
     }
     else if os.stem(exe_dir) == "no_gfx_api"

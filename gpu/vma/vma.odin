@@ -1,7 +1,12 @@
 package vma
 
-when ODIN_OS == .Linux || ODIN_OS == .Darwin {
-	@(require, extra_linker_flags="-lstdc++") foreign import stdcpp "system:c++"
+when ODIN_OS == .Linux {
+	@(require, extra_linker_flags = "-lstdc++")
+	foreign import stdcpp "system:stdc++"
+}
+when ODIN_OS == .Darwin {
+	@(require, extra_linker_flags = "-lstdc++")
+	foreign import stdcpp "system:c++"
 }
 
 when ODIN_OS == .Windows {

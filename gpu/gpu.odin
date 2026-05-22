@@ -353,7 +353,7 @@ commands_begin: proc(queue: Queue, loc := #caller_location) -> Command_Buffer : 
 cmd_mem_copy_raw: proc(cmd_buf: Command_Buffer, dst, src: gpuptr, #any_int bytes: i64, loc := #caller_location) : _cmd_mem_copy_raw
 cmd_copy_to_texture: proc(cmd_buf: Command_Buffer, dst: Texture, src: gpuptr, region: Texture_Region, loc := #caller_location) : _cmd_copy_to_texture
 // TODO: Missing cmd_copy_from_texture
-cmd_blit_texture: proc(cmd_buf: Command_Buffer, src, dst: Texture, src_rects: []Blit_Rect, dst_rects: []Blit_Rect, filter: Filter, loc := #caller_location) : _cmd_blit_texture
+cmd_blit_texture: proc(cmd_buf: Command_Buffer, dst: Texture, dst_rect: Blit_Rect, src: Texture, src_rect: Blit_Rect, filter: Filter, loc := #caller_location) : _cmd_blit_texture
 
 cmd_set_desc_heap: proc(cmd_buf: Command_Buffer, textures, textures_rw, samplers, bvhs: gpuptr, loc := #caller_location) : _cmd_set_desc_heap
 
@@ -400,6 +400,15 @@ cmd_insert_debug_label: proc(cmd_buf: Command_Buffer, name: string, color: [4]f3
 
 /////////////////////////
 // Userland Utilities
+
+// Pointer
+ptr_advance :: proc(addr: ptr, #any_int offset: i64) -> ptr
+{
+    res := addr
+    if res.cpu != nil { res.cpu = rawptr(uintptr(res.cpu) + uintptr(offset)) }
+    res.gpu.ptr = rawptr(uintptr(res.gpu.ptr) + uintptr(offset))
+    return addr
+}
 
 // Slice
 // end == -1 means "until the end"
@@ -497,14 +506,14 @@ mem_alloc :: proc {
     mem_alloc_slice,
 }
 
-mem_free_ptr :: #force_inline proc(addr: ptr_t($T))
+mem_free_ptr :: #force_inline proc(addr: ptr_t($T), loc := #caller_location)
 {
-    mem_free_raw(addr.gpu)
+    mem_free_raw(addr.gpu, loc = loc)
 }
 
-mem_free_slice :: #force_inline proc(addr: slice_t($T))
+mem_free_slice :: #force_inline proc(addr: slice_t($T), loc := #caller_location)
 {
-    mem_free_raw(addr.gpu)
+    mem_free_raw(addr.gpu, loc = loc)
 }
 
 mem_free :: proc {
@@ -747,7 +756,7 @@ cmd_generate_mipmaps :: proc(cmd_buf: Command_Buffer, texture: Texture)
 
         src := Blit_Rect { mip_level = mip - 1 }
         dst := Blit_Rect { mip_level = mip }
-        cmd_blit_texture(cmd_buf, texture, texture, { src }, { dst }, .Linear)
+        cmd_blit_texture(cmd_buf, texture, dst, texture, src, .Linear)
     }
 }
 

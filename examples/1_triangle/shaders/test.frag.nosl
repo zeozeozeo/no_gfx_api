@@ -1,5 +1,0 @@
-
-main :: (color: vec4 @input(0)) -> vec4 @output(0)
-{
-    return color;
-}

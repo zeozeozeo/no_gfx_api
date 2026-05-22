@@ -75,7 +75,8 @@ cmd_build_example_shaders_nosl :: proc(example: Example) -> bool
     return res
 }
 
-Shader_Type :: enum { Vertex, Fragment, Compute }
+Shader_Stage :: enum { Vertex, Fragment, Compute }
+Shader_Stages :: distinct bit_set[Shader_Stage]
 
 cmd_build_example_shaders_slang :: proc(example: Example) -> bool
 {
@@ -84,49 +85,36 @@ cmd_build_example_shaders_slang :: proc(example: Example) -> bool
     {
         dir, _ := os.split_path(shader)
 
-        shader_types: bit_set[Shader_Type]
-        for nosl_shader in example.shaders_nosl
-        {
-            if os.stem(shader) == os.stem(os.stem(nosl_shader))
-            {
-                shader_type_ext := os.ext(os.stem(nosl_shader))
-                switch shader_type_ext
-                {
-                    case ".vert": shader_types += { .Vertex }
-                    case ".frag": shader_types += { .Fragment }
-                    case ".comp": shader_types += { .Compute }
-                }
-            }
-        }
-
-        if .Vertex in shader_types
+        stages := get_slang_stages(shader)
+        if .Vertex in stages
         {
             spv_path := fmt.tprintf("%v/%v.vert.spv", dir, os.stem(shader))
             res &= run_task("slangc",
-                           "-target", "spirv",
-                           "-fvk-use-c-layout", "-fvk-use-scalar-layout", "-force-glsl-scalar-layout",
-                           "-validate-ir", "-no-mangle", "-entry", "vertexMain",
-                           "-stage", "vertex", shader, "-o", spv_path)
+                            "-target", "spirv",
+                            "-fvk-use-c-layout", "-fvk-use-scalar-layout", "-force-glsl-scalar-layout",
+                            "-validate-ir", "-no-mangle", "-entry", "vertexMain",
+                            "-stage", "vertex", shader, "-o", spv_path)
         }
-        if .Fragment in shader_types
+        if .Fragment in stages
         {
             spv_path := fmt.tprintf("%v/%v.frag.spv", dir, os.stem(shader))
             res &= run_task("slangc",
-                           "-target", "spirv",
-                           "-fvk-use-c-layout", "-fvk-use-scalar-layout", "-force-glsl-scalar-layout",
-                           "-validate-ir", "-no-mangle", "-entry", "fragmentMain",
-                           "-stage", "fragment", shader, "-o", spv_path)
+                            "-target", "spirv",
+                            "-fvk-use-c-layout", "-fvk-use-scalar-layout", "-force-glsl-scalar-layout",
+                            "-validate-ir", "-no-mangle", "-entry", "fragmentMain",
+                            "-stage", "fragment", shader, "-o", spv_path)
         }
-        if .Compute in shader_types
+        if .Compute in stages
         {
             spv_path := fmt.tprintf("%v/%v.comp.spv", dir, os.stem(shader))
             res &= run_task("slangc",
-                           "-target", "spirv",
-                           "-fvk-use-c-layout", "-fvk-use-scalar-layout", "-force-glsl-scalar-layout",
-                           "-validate-ir", "-no-mangle", "-entry", "computeMain",
-                           "-stage", "compute", shader, "-o", spv_path)
+                            "-target", "spirv",
+                            "-fvk-use-c-layout", "-fvk-use-scalar-layout", "-force-glsl-scalar-layout",
+                            "-validate-ir", "-no-mangle", "-entry", "computeMain",
+                            "-stage", "compute", shader, "-o", spv_path)
         }
     }
+
     return res
 }
 
@@ -400,4 +388,18 @@ change_working_dir_to_project_root :: proc()
     {
         exit_with_error("Incorrect executable directory '%v', must be either 'no_gfx_api' or 'build'.", os.stem(exe_dir))
     }
+}
+
+get_slang_stages :: proc(path: string) -> Shader_Stages
+{
+    content, err := os.read_entire_file(path, allocator = context.allocator)
+    defer delete(content)
+    ensure(err == nil)
+
+    content_str := string(content)
+    res: Shader_Stages
+    if strings.contains(content_str, "[shader(\"vertex\")]")   do res += { .Vertex }
+    if strings.contains(content_str, "[shader(\"fragment\")]") do res += { .Fragment }
+    if strings.contains(content_str, "[shader(\"compute\")]")  do res += { .Compute }
+    return res
 }

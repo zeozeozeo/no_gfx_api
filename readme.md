@@ -148,23 +148,28 @@ Vertex :: struct
     color: vec3
 }
 
-Data :: struct
+Vert_Data :: struct
 {
     verts: []Vertex,
 }
 
-Output :: struct
+Vert_Output :: struct
 {
     pos: vec4 @position,
-    color: vec4 @output(0),
+    color: vec4 @io(0),
 }
 
-main :: (vert_id: uint @vert_id, data: ^Data @data) -> Output
+vert :: #vertex (vert_id: uint @vert_id, data: ^Vert_Data @data) -> Vert_Output
 {
-    out: Output;
-    out.pos = vec4(data.verts[vert_id].pos.xyz, 1.0);
+    out: Vert_Output;
+    out.pos = vec4(data.verts[vert_id].pos, 1.0);
     out.color = vec4(data.verts[vert_id].color, 1.0);
     return out;
+}
+
+frag :: #fragment (input: Vert_Output) -> vec4 @io(0)
+{
+    return input.color;
 }
 ```
 
@@ -173,7 +178,7 @@ main :: (vert_id: uint @vert_id, data: ^Data @data) -> Output
 Importing **no_gfx** into your own project mostly just involves copying the `gpu/` directory, but to build this project you will need:
 
 - [Odin >= 2026-03](https://odin-lang.org/)
-- [Vulkan SDK](https://vulkan.lunarg.com/)
+- [Vulkan SDK](https://vulkan.lunarg.com/) (not required, but recommended for low-level Vulkan validation)
 - [make](https://www.gnu.org/software/make/)
 
 Binaries for dependencies are included.

@@ -19,7 +19,6 @@ full_build: vercheck_native build_vma build_imgui check_gpu build
 vercheck:
 	make --version
 	odin version
-	glslangValidator --version
 	slangc -v
 	vulkaninfo --summary
 
@@ -105,10 +104,9 @@ build_imgui:
 # ==== Shaders ====
 
 shader_nosl:
-	./build/gpu_compiler$(exe_extension) "$(shader).nosl"
-	glslangValidator $(glsl_flags) -V "$(shader).glsl" -o "$(shader).spv"
+	./build/gpu_compiler$(exe_extension) "$(shader).nosl" -out:"$(shader).spv"
 
-# Compiles NOSL shaders for one example via gpu_compiler + glslangValidator.
+# Compiles NOSL shaders for one example
 shaders_nosl:
 	$(foreach shader,$(wildcard examples/$(example)/shaders/*.nosl),make shader_nosl shader=$(subst .nosl,,$(shader));)
 

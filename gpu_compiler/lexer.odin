@@ -58,6 +58,7 @@ Token_Type :: enum
 
     Ident,
     Attribute,  // Identifier with @ in front
+    Directive,  // Identifier with # in front
     // Qualifiers
     Flat,
     Noperspective,
@@ -75,6 +76,8 @@ Token_Type :: enum
     Return,
     Discard,
     Cast,
+    Mut,
+    Using,
 
     // Literals
     IntLit,
@@ -102,6 +105,8 @@ Keywords := map[string]Token_Type {
     "flat"   = .Flat,
     "no_perspective" = .Noperspective,
     "centroid" = .Centroid,
+    "mut" = .Mut,
+    "using" = .Using,
 }
 One_Char_Operators := map[u8]Token_Type {
     '(' = .LParen,
@@ -154,8 +159,11 @@ Token :: struct
     offset: u32,  // Offset into file
 }
 
-lex_file :: proc(filename: string, file_content: []u8, allocator: runtime.Allocator) -> []Token
+lex_file :: proc(file: File, allocator: runtime.Allocator) -> []Token
 {
+    filename := file.filename
+    file_content := file.content
+
     tokens := make([dynamic]Token, allocator = allocator)
 
     lexer := Lexer {
@@ -204,11 +212,16 @@ next_token :: proc(using lexer: ^Lexer) -> Token
     {
         // Null terminator found
     }
-    else if is_ident_begin(buf[offset]) || buf[offset] == '@'
+    else if is_ident_begin(buf[offset]) || buf[offset] == '@' || buf[offset] == '#'
     {
         if buf[offset] == '@'
         {
             token.type = .Attribute
+            offset += 1
+        }
+        else if buf[offset] == '#'
+        {
+            token.type = .Directive
             offset += 1
         }
         else
@@ -355,15 +368,25 @@ eat_all_whitespace :: proc(using lexer: ^Lexer)
     }
 }
 
+@(private="file")
+MSG_AFTER: string
+set_msg_after :: proc(after: string)
+{
+    MSG_AFTER = after
+}
+
 error_msg :: proc(file: File, token: Token, fmt_str: string, args: ..any)
 {
+    // Reset globals
+    defer MSG_AFTER = ""
+
     if supports_ansi() {
         fmt.printf("%v(%v:%v): %vError%v: ", file.filename, token.line+1, token.col_start+1, "\033[31m", "\033[0m")
     } else {
         fmt.printf("%v(%v:%v): Error: ", file.filename, token.line+1, token.col_start+1)
     }
     fmt.printfln(fmt_str, ..args)
-    fmt.print("    ")
+    fmt.print("\t")
 
     // Find and print line of code
     offset_begin := token.offset
@@ -390,19 +413,21 @@ error_msg :: proc(file: File, token: Token, fmt_str: string, args: ..any)
     offset_end := token.offset
     for
     {
-        if offset_end >= u32(len(file.content)) || is_newline(file.content[offset_end + 1]) {
+        if offset_end+1 >= u32(len(file.content)) || is_newline(file.content[offset_end + 1]) {
             break
         }
 
         offset_end += 1
     }
 
+    if len(token.text) == 0 do return
+
     loc := string(file.content[offset_begin:offset_end+1])
     fmt.println(loc)
 
     // Print token underline
     {
-        fmt.print("    ")
+        fmt.print("\t")
         for _ in 0..<int(token.col_start)-whitespace_count {
             fmt.print(" ")
         }
@@ -422,6 +447,11 @@ error_msg :: proc(file: File, token: Token, fmt_str: string, args: ..any)
         }
 
         fmt.print("\n")
+    }
+
+    // Print "after message"
+    {
+        fmt.print(MSG_AFTER)
     }
 }
 
@@ -527,9 +557,11 @@ token_type_to_string :: proc(type: Token_Type) -> string
         case .Div_Equals:   return "/="
         case .Ident:        return "identifier"
         case .Attribute:    return "attribute"
+        case .Directive:    return "directive"
         case .Flat:         return "flat"
         case .Noperspective:return "no_perspective"
         case .Centroid:     return "centroid"
+        case .Mut:          return "mut"
         case .Arrow:        return "->"
         case .Struct:       return "struct"
         case .If:           return "if"
@@ -539,6 +571,7 @@ token_type_to_string :: proc(type: Token_Type) -> string
         case .Continue:     return "continue"
         case .Discard:      return "discard"
         case .Return:       return "return"
+        case .Using:        return "using"
         case .IntLit:       return "integer literal"
         case .FloatLit:     return "floating point literal"
         case .StrLit:       return "string literal"

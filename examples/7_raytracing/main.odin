@@ -60,8 +60,8 @@ main :: proc()
 
     group_size_x := u32(8)
     group_size_y := u32(8)
-    vert_shader := gpu.shader_create(#load("shaders/test.vert.spv", []u32), .Vertex)
-    frag_shader := gpu.shader_create(#load("shaders/test.frag.spv", []u32), .Fragment)
+    vert_shader := gpu.shader_create(#load("shaders/shader.vert.spv", []u32), .Vertex)
+    frag_shader := gpu.shader_create(#load("shaders/shader.frag.spv", []u32), .Fragment)
     pathtrace_shader := gpu.shader_create_compute(#load("shaders/pathtracer.comp.spv", []u32), group_size_x, group_size_y, 1)
     defer {
         gpu.shader_destroy(vert_shader)
@@ -102,7 +102,6 @@ main :: proc()
         output_texture_id: u32,
         tlas_id: u32,
         scene: Scene_Shader,
-        resolution: [2]f32,
         accum_counter: u32,
         camera_to_world: [16]f32,
     }
@@ -224,7 +223,6 @@ main :: proc()
         compute_data.cpu.tlas_id = bvh_id
         compute_data.cpu.scene = { instances = scene.instances.gpu.ptr, meshes = scene.meshes_shader.gpu.ptr }
         compute_data.cpu.accum_counter = accum_counter
-        compute_data.cpu.resolution = { f32(window_size_x), f32(window_size_y) }
         compute_data.cpu.camera_to_world = intr.matrix_flatten(camera_to_world)
 
         cmd_buf := gpu.commands_begin(.Main)

@@ -6,8 +6,24 @@ package main
 
 import "base:runtime"
 import "core:fmt"
+import str "core:strings"
 
-typecheck_ast :: proc(ast: ^Ast, file: File, allocator: runtime.Allocator) -> bool
+typecheck_files :: proc(parse_tasks: ^[dynamic; MAX_FILES]Parse_Task, allocator: runtime.Allocator) -> bool
+{
+    add_intrinsics()
+
+    res := true
+    for &task in parse_tasks {
+        res &= typecheck_ast_decls(&task.ast, task.file, task.module_name, task.is_main, allocator)
+    }
+    for &task in parse_tasks {
+        res &= typecheck_ast_defs(&task.ast, task.file, allocator)
+    }
+
+    return res
+}
+
+typecheck_ast_decls :: proc(ast: ^Ast, file: File, module_name: string, is_module_main: bool, allocator: runtime.Allocator) -> bool
 {
     context.allocator = allocator
 
@@ -20,8 +36,6 @@ typecheck_ast :: proc(ast: ^Ast, file: File, allocator: runtime.Allocator) -> bo
         proc_ret = nil,
     }
 
-    add_intrinsics()
-
     for decl in ast.scope.decls
     {
         switch decl.type.kind
@@ -31,6 +45,8 @@ typecheck_ast :: proc(ast: ^Ast, file: File, allocator: runtime.Allocator) -> bo
             case .Unknown: {}
             case .Proc:
             {
+                decl.glsl_name = global_ident_to_glsl(decl.name, module_name, is_module_main)
+
                 for arg in decl.type.args
                 {
                     resolve_type(&c, arg.type)
@@ -42,17 +58,44 @@ typecheck_ast :: proc(ast: ^Ast, file: File, allocator: runtime.Allocator) -> bo
             }
             case .Struct:
             {
+                decl.glsl_name = global_ident_to_glsl(decl.name, module_name, is_module_main)
+
                 for member in decl.type.members
                 {
+                    member.glsl_name = ident_to_glsl(member.name)
                     resolve_type(&c, member.type)
                 }
+
+                if len(decl.type.members) == 0 {
+                    typecheck_error(&c, decl.token, "Empty structs aren't allowed.")
+                }
             }
-            case .Label: {}
-            case .Primitive: {}
-            case .Pointer: {}
-            case .Slice: {}
-            case .Array: {}
+            case .Label, .Primitive, .Pointer, .Slice, .Array:
+            {
+                decl.glsl_name = global_ident_to_glsl(decl.name, module_name, is_module_main)
+                resolve_type(&c, decl.type)
+            }
         }
+    }
+
+    return !c.error
+}
+
+typecheck_ast_defs :: proc(ast: ^Ast, file: File, allocator: runtime.Allocator) -> bool
+{
+    context.allocator = allocator
+
+    c := Checker {
+        ast = ast,
+        file = file,
+        scope = ast.scope,
+        error = false,
+        cur_proc = nil,
+        proc_ret = nil,
+    }
+
+    for global_var in ast.global_vars {
+        typecheck_statement(&c, global_var)
     }
 
     for proc_def in ast.procs
@@ -62,6 +105,7 @@ typecheck_ast :: proc(ast: ^Ast, file: File, allocator: runtime.Allocator) -> bo
         for decl in proc_def.scope.decls
         {
             resolve_type(&c, decl.type)
+            if decl.name == "pi" do fmt.println("changing")
             decl.glsl_name = ident_to_glsl(decl.name)
 
             if decl.attr != nil && decl.attr.?.type == .Data
@@ -130,6 +174,8 @@ typecheck_statement :: proc(using c: ^Checker, statement: ^Ast_Statement)
             typecheck_expr(c, stmt.rhs)
             if stmt.rhs.type.kind == .Poison do break
 
+            if !check_assign_lhs(c, stmt.lhs) do break
+
             if stmt.apply_op
             {
                 bin_op_type, ok := bin_op_result_type(stmt.bin_op, stmt.lhs.type, stmt.rhs.type)
@@ -148,7 +194,9 @@ typecheck_statement :: proc(using c: ^Checker, statement: ^Ast_Statement)
         case ^Ast_Define_Var:
         {
             typecheck_expr(c, stmt.expr)
-            stmt.decl.glsl_name = ident_to_glsl(stmt.decl.name)
+            if stmt.decl.glsl_name == "" {
+                stmt.decl.glsl_name = ident_to_glsl(stmt.decl.name)
+            }
 
             if stmt.expr.type.kind == .None
             {
@@ -295,7 +343,7 @@ typecheck_expr :: proc(using c: ^Checker, expression: ^Ast_Expr)
         }
         case ^Ast_Ident_Expr:
         {
-            decl := decl_lookup(c, expr.token)
+            decl := decl_lookup(scope, ast.imports[:], expr.token)
             if decl == nil {
                 typecheck_error(c, expr.token, "Undeclared identifier '%v'.", expr.token.text)
             } else {
@@ -347,12 +395,33 @@ typecheck_expr :: proc(using c: ^Checker, expression: ^Ast_Expr)
         }
         case ^Ast_Member_Access:
         {
+            // Check module access
+            target_ident, is_ident := expr.target.derived_expr.(^Ast_Ident_Expr)
+            if is_ident
+            {
+                module := find_module(c, target_ident.token.text)
+                if module != nil
+                {
+                    decl := decl_lookup(module.info.ast.scope, {}, expr.member, false)
+                    if decl == nil {
+                        typecheck_error(c, expr.member, "Undeclared identifier '%v' in module '%v'.", expr.member.text, module.module_name)
+                    } else {
+                        expr.type = decl.type
+                    }
+
+                    expr.is_module_access = true
+                    expr.module_name = module.info.module_name
+                    break
+                }
+            }
+
             typecheck_expr(c, expr.target)
             if expr.target.type.kind == .Poison do break
 
+            // Check swizzle
             if expr.target.type.kind == .Primitive
             {
-                type, is_swizzle := handle_vector_swizzle(expr.target.type, expr.member_name)
+                type, is_swizzle := handle_vector_swizzle(expr.target.type, expr.member.text)
                 if is_swizzle
                 {
                     expr.type = type
@@ -365,14 +434,14 @@ typecheck_expr :: proc(using c: ^Checker, expression: ^Ast_Expr)
             if base.kind == .Poison do break
 
             if base.kind != .Struct {
-                typecheck_error(c, expr.token, "Can't access members on this type.")
+                typecheck_error(c, expr.token, "Can't access members on type '%v'.", type_to_string(expr.target.type, arena = scratch))
                 break
             }
 
             field_type := &POISON_TYPE
             for field in base.members
             {
-                if field.name == expr.member_name
+                if field.name == expr.member.text
                 {
                     field_type = field.type
                     break
@@ -380,10 +449,12 @@ typecheck_expr :: proc(using c: ^Checker, expression: ^Ast_Expr)
             }
 
             if field_type == &POISON_TYPE {
-                typecheck_error(c, expr.token, "Member '%v' not found.", expr.member_name)
+                typecheck_error(c, expr.token, "Member '%v' not found.", expr.member.text)
             }
 
             expr.type = field_type
+            inherit_constness := expr.target.type.kind != .Pointer && expr.target.is_const
+            expr.is_const = inherit_constness || (expr.target.type.kind == .Pointer && !expr.target.type.is_mut)
         }
         case ^Ast_Array_Access:
         {
@@ -398,6 +469,8 @@ typecheck_expr :: proc(using c: ^Checker, expression: ^Ast_Expr)
             }
 
             expr.type = expr.target.type.base
+            inherit_constness := expr.target.type.kind != .Slice && expr.target.is_const
+            expr.is_const = inherit_constness || (expr.target.type.kind == .Slice && !expr.target.type.is_mut)
         }
         case ^Ast_Call:
         {
@@ -410,51 +483,31 @@ typecheck_expr :: proc(using c: ^Checker, expression: ^Ast_Expr)
             target, is_ident := expr.target.derived_expr.(^Ast_Ident_Expr)
             if is_ident
             {
-                // Try to resolve intrinsic overloads
-                for intr in INTRINSICS
+                found, ok_l := intrinsic_lookup(c, target.token, expr.args)
+                if !ok_l do break
+
+                if found != nil
                 {
-                    if intr.name == target.token.text && intr.type.kind == .Proc
+                    expr.target.type = found.type
+                    expr.type = found.type.ret
+
+                    if target.token.text == "rayquery_init" ||
+                       target.token.text == "rayquery_proceed" ||
+                       target.token.text == "rayquery_candidate" ||
+                       target.token.text == "rayquery_accept" ||
+                       target.token.text == "rayquery_result" {
+                        ast.used_features += { .Raytracing }
+                    }
+
+                    if target.token.text == "printf"
                     {
-                        arg_count_matches := len(intr.type.args) == len(expr.args)
-                        arg_count_matches |= intr.type.is_variadic && len(expr.args) >= len(intr.type.args)
-                        if arg_count_matches
-                        {
-                            match := true
-                            for i in 0..<len(intr.type.args)
-                            {
-                                arg := expr.args[i]
-                                if !type_implicit_convert(arg.type, intr.type.args[i].type)
-                                {
-                                    match = false
-                                    break
-                                }
-                            }
-
-                            if match
-                            {
-                                expr.target.type = intr.type
-                                expr.type = intr.type.ret
-
-                                if target.token.text == "rayquery_init" ||
-                                   target.token.text == "rayquery_proceed" ||
-                                   target.token.text == "rayquery_candidate" ||
-                                   target.token.text == "rayquery_accept" ||
-                                   target.token.text == "rayquery_result" {
-                                    ast.used_features += { .Raytracing }
-                                }
-
-                                if target.token.text == "printf"
-                                {
-                                    if !check_printf(c, expr) {
-                                        return
-                                    }
-                                }
-
-                                expr.glsl_name = intr.glsl_name
-                                break expr_switch
-                            }
+                        if !check_printf(c, expr) {
+                            return
                         }
                     }
+
+                    expr.glsl_name = found.glsl_name
+                    break
                 }
             }
 
@@ -486,21 +539,49 @@ typecheck_expr :: proc(using c: ^Checker, expression: ^Ast_Expr)
     }
 }
 
+find_module :: proc(using c: ^Checker, s: string) -> ^Ast_Import
+{
+    for &module in ast.imports
+    {
+        if module.module_name == s {
+            return &module
+        }
+    }
+    return nil
+}
+
 POISON_TYPE := Ast_Type { kind = .Poison }
 FLOAT_TYPE := Ast_Type { kind = .Primitive, primitive_kind = .Float, name = { text = "float" } }
 UINT_TYPE := Ast_Type { kind = .Primitive, primitive_kind = .Uint, name = { text = "uint" } }
+INT_TYPE := Ast_Type { kind = .Primitive, primitive_kind = .Int, name = { text = "int" } }
 UNTYPED_FLOAT_TYPE := Ast_Type { kind = .Primitive, primitive_kind = .Untyped_Float, name = { text = "untyped float" } }
 UNTYPED_INT_TYPE := Ast_Type { kind = .Primitive, primitive_kind = .Untyped_Int, name = { text = "untyped int" } }
-INT_TYPE := Ast_Type { kind = .Primitive, primitive_kind = .Int, name = { text = "int" } }
-VEC2_TYPE := Ast_Type { kind = .Primitive, primitive_kind = .Vec2, name = { text = "vec2" } }
-VEC3_TYPE := Ast_Type { kind = .Primitive, primitive_kind = .Vec3, name = { text = "vec3" } }
-VEC4_TYPE := Ast_Type { kind = .Primitive, primitive_kind = .Vec4, name = { text = "vec4" } }
+VEC2_TYPE := Ast_Type { kind = .Primitive, primitive_kind = .Vector, base = &FLOAT_TYPE, dimensions = { 2, 1 }, name = { text = "vec2" } }
+VEC3_TYPE := Ast_Type { kind = .Primitive, primitive_kind = .Vector, base = &FLOAT_TYPE, dimensions = { 3, 1 }, name = { text = "vec3" } }
+VEC4_TYPE := Ast_Type { kind = .Primitive, primitive_kind = .Vector, base = &FLOAT_TYPE, dimensions = { 4, 1 }, name = { text = "vec4" } }
+IVEC2_TYPE := Ast_Type { kind = .Primitive, primitive_kind = .Vector, base = &INT_TYPE, dimensions = { 2, 1 }, name = { text = "ivec2" } }
+IVEC3_TYPE := Ast_Type { kind = .Primitive, primitive_kind = .Vector, base = &INT_TYPE, dimensions = { 3, 1 }, name = { text = "ivec3" } }
+IVEC4_TYPE := Ast_Type { kind = .Primitive, primitive_kind = .Vector, base = &INT_TYPE, dimensions = { 4, 1 }, name = { text = "ivec4" } }
+UVEC2_TYPE := Ast_Type { kind = .Primitive, primitive_kind = .Vector, base = &UINT_TYPE, dimensions = { 2, 1 }, name = { text = "uvec2" } }
+UVEC3_TYPE := Ast_Type { kind = .Primitive, primitive_kind = .Vector, base = &UINT_TYPE, dimensions = { 3, 1 }, name = { text = "uvec3" } }
+UVEC4_TYPE := Ast_Type { kind = .Primitive, primitive_kind = .Vector, base = &UINT_TYPE, dimensions = { 4, 1 }, name = { text = "uvec4" } }
+BVEC2_TYPE := Ast_Type { kind = .Primitive, primitive_kind = .Vector, base = &BOOL_TYPE, dimensions = { 2, 1 }, name = { text = "bvec2" } }
+BVEC3_TYPE := Ast_Type { kind = .Primitive, primitive_kind = .Vector, base = &BOOL_TYPE, dimensions = { 3, 1 }, name = { text = "bvec3" } }
+BVEC4_TYPE := Ast_Type { kind = .Primitive, primitive_kind = .Vector, base = &BOOL_TYPE, dimensions = { 4, 1 }, name = { text = "bvec4" } }
 BOOL_TYPE := Ast_Type { kind = .Primitive, primitive_kind = .Bool, name = { text = "bool" } }
 TEXTURE_ID_TYPE := Ast_Type { kind = .Primitive, primitive_kind = .Texture_ID, name = { text = "texture_id" } }
 TEXTURE_RW_ID_TYPE := Ast_Type { kind = .Primitive, primitive_kind = .Texture_RW_ID, name = { text = "texture_rw_id" } }
 SAMPLER_ID_TYPE := Ast_Type { kind = .Primitive, primitive_kind = .Sampler_ID, name = { text = "sampler_id" } }
 BVH_ID_TYPE := Ast_Type { kind = .Primitive, primitive_kind = .BVH_ID, name = { text = "bvh_id" } }
-MAT4_TYPE := Ast_Type { kind = .Primitive, primitive_kind = .Mat4, name = { text = "mat4" } }
+MAT4_TYPE := Ast_Type { kind = .Primitive, primitive_kind = .Matrix, base = &FLOAT_TYPE, dimensions = { 4, 4 }, name = { text = "mat4" } }
+MAT4x2_TYPE := Ast_Type { kind = .Primitive, primitive_kind = .Matrix, base = &FLOAT_TYPE, dimensions = { 4, 2 }, name = { text = "mat4x2" } }
+MAT4x3_TYPE := Ast_Type { kind = .Primitive, primitive_kind = .Matrix, base = &FLOAT_TYPE, dimensions = { 4, 3 }, name = { text = "mat4x3" } }
+MAT3_TYPE := Ast_Type { kind = .Primitive, primitive_kind = .Matrix, base = &FLOAT_TYPE, dimensions = { 3, 3 }, name = { text = "mat3" } }
+MAT3x2_TYPE := Ast_Type { kind = .Primitive, primitive_kind = .Matrix, base = &FLOAT_TYPE, dimensions = { 3, 2 }, name = { text = "mat3x2" } }
+MAT3x4_TYPE := Ast_Type { kind = .Primitive, primitive_kind = .Matrix, base = &FLOAT_TYPE, dimensions = { 3, 4 }, name = { text = "mat3x4" } }
+MAT2_TYPE := Ast_Type { kind = .Primitive, primitive_kind = .Matrix, base = &FLOAT_TYPE, dimensions = { 2, 2 }, name = { text = "mat2" } }
+MAT2x3_TYPE := Ast_Type { kind = .Primitive, primitive_kind = .Matrix, base = &FLOAT_TYPE, dimensions = { 2, 3 }, name = { text = "mat2x3" } }
+MAT2x4_TYPE := Ast_Type { kind = .Primitive, primitive_kind = .Matrix, base = &FLOAT_TYPE, dimensions = { 2, 4 }, name = { text = "mat2x4" } }
 STRING_TYPE := Ast_Type { kind = .Primitive, primitive_kind = .String, name = { text = "string" } }
 RAYQUERY_TYPE := Ast_Type { kind = .Primitive, primitive_kind = .Ray_Query, name = { text = "Ray_Query" } }
 
@@ -511,6 +592,8 @@ same_type :: proc(type1: ^Ast_Type, type2: ^Ast_Type) -> bool
     if type1.kind != type2.kind do return false
     if type1.primitive_kind != type2.primitive_kind do return false
     if type1.name.text != type2.name.text do return false
+    if type1.is_mut != type2.is_mut do return false
+    if type1.dimensions != type2.dimensions do return false
 
     has_base := type1.kind != .Primitive && type1.kind != .Label
     if has_base && !same_type(type1.base, type2.base) do return false
@@ -521,10 +604,11 @@ type_get_base :: proc(type: ^Ast_Type) -> ^Ast_Type
 {
     if type.kind == .Poison do return &POISON_TYPE
     if type.base == nil do return type
+    if type.kind == .Primitive do return type
     return type_get_base(type.base)
 }
 
-decl_lookup :: proc(using c: ^Checker, token: Token) -> ^Ast_Decl
+decl_lookup :: proc(scope: ^Ast_Scope, imports: []Ast_Import, token: Token, allow_intrinsics := true) -> ^Ast_Decl
 {
     cur_scope := scope
     for cur_scope != nil
@@ -543,16 +627,131 @@ decl_lookup :: proc(using c: ^Checker, token: Token) -> ^Ast_Decl
         cur_scope = cur_scope.enclosing_scope
     }
 
-    for intr in INTRINSICS
+    if allow_intrinsics
     {
-        ignore_order := intr.type.kind == .Struct || intr.type.kind == .Proc
-        if !ignore_order && raw_data(intr.token.text) > raw_data(token.text) {
-            continue
+        for intr in INTRINSICS
+        {
+            ignore_order := intr.type.kind == .Struct || intr.type.kind == .Proc
+            if !ignore_order && raw_data(intr.token.text) > raw_data(token.text) {
+                continue
+            }
+            if intr.name == token.text do return intr
         }
-        if intr.name == token.text do return intr
+    }
+
+    for imported in imports
+    {
+        if !imported.using_active do continue
+        found := decl_lookup(imported.info.ast.scope, {}, token, false)
+        if found != nil do return found
     }
 
     return nil
+}
+
+// Try to resolve intrinsic overloads
+intrinsic_lookup :: proc(using c: ^Checker, token: Token, args: []^Ast_Expr) -> (found: ^Ast_Decl, ok: bool)
+{
+    scratch, _ := acquire_scratch()
+    name_is_intr := false
+
+    // Check for possible implicit type conversions.
+    overload_candidates := make([dynamic]^Ast_Decl, allocator = scratch)
+    num_overloads := 0
+    for intr in INTRINSICS
+    {
+        if intr.name == token.text && intr.type.kind == .Proc
+        {
+            name_is_intr = true
+            num_overloads += 1
+
+            arg_count_matches := len(intr.type.args) == len(args)
+            arg_count_matches |= intr.type.is_variadic && len(args) >= len(intr.type.args)
+            if arg_count_matches
+            {
+                match := true
+                for i in 0..<len(intr.type.args)
+                {
+                    arg := args[i]
+                    if !type_implicit_convert(arg.type, intr.type.args[i].type)
+                    {
+                        match = false
+                        break
+                    }
+                }
+
+                if match do append(&overload_candidates, intr)
+            }
+        }
+    }
+
+    if !name_is_intr do return nil, true
+    if len(overload_candidates) == 1 do return overload_candidates[0], true
+
+    // If there are multiple possible candidates and one isn't
+    // an exact match that is an error (ambiguous overload).
+    for candidate in overload_candidates
+    {
+        exact_match := true
+        for i in 0..<len(candidate.type.args)
+        {
+            arg := args[i]
+            if !same_type(arg.type, candidate.type.args[i].type)
+            {
+                exact_match = false
+                break
+            }
+        }
+
+        if exact_match do return candidate, true
+    }
+
+    // Failure!
+
+    if num_overloads == 1
+    {
+        // If there are no overloads, use normal error messages instead.
+        return nil, true
+    }
+
+    sb := str.builder_make_none()
+    defer str.builder_destroy(&sb)
+
+    str.write_string(&sb, "\tGiven argument types:\n")
+    for arg in args {
+        fmt.sbprintfln(&sb, "\t - %v", type_to_string(arg.type, arena = scratch))
+    }
+
+    str.write_string(&sb, "Did you mean one of the following overloads?\n")
+    for intr in INTRINSICS
+    {
+        if intr.name == token.text && intr.type.kind == .Proc
+        {
+            fmt.sbprintf(&sb, "\t%v :: (", intr.name)
+            for arg, i in intr.type.args {
+                if i > 0 do str.write_string(&sb, ", ")
+                fmt.sbprintf(&sb, "%v: %v", arg.name, type_to_string(arg.type, arena = scratch))
+            }
+            if intr.type.ret != nil {
+                fmt.sbprintfln(&sb, ") -> %v", type_to_string(intr.type.ret, arena = scratch))
+            } else {
+                fmt.sbprintfln(&sb, ")")
+            }
+        }
+    }
+
+    if len(overload_candidates) == 0  // It matches the name of an intrinsic but there is no matching overload
+    {
+        set_msg_after(str.to_string(sb))
+        typecheck_error(c, token, "No matching overload found for intrinsic '%v':", token.text)
+        return nil, false
+    }
+    else  // No exact match was found, so there's ambiguity here.
+    {
+        set_msg_after(str.to_string(sb))
+        typecheck_error(c, token, "Ambiguous call for intrinsic '%v' that match with the given arguments:", token.text)
+        return nil, false
+    }
 }
 
 resolve_type :: proc(using c: ^Checker, type: ^Ast_Type)
@@ -560,13 +759,14 @@ resolve_type :: proc(using c: ^Checker, type: ^Ast_Type)
     base := type_get_base(type)
     if base.kind == .Label
     {
-        type_decl := decl_lookup(c, base.name)
+        type_decl := decl_lookup(scope, ast.imports[:], base.name)
         if type_decl == nil {
             typecheck_error(c, base.name, "Undeclared identifier '%v'.", base.name.text)
             base.kind = .Poison  // Turn the declaration into the poison type
             base.primitive_kind = {}
         } else {
             base.base = type_decl.type
+            base.decl = type_decl
         }
     }
 }
@@ -599,13 +799,13 @@ add_intrinsics :: proc()
 {
     // Resource access
     add_intrinsic("texture_sample", { &TEXTURE_ID_TYPE, &SAMPLER_ID_TYPE, &VEC2_TYPE }, { "tex_idx", "sampler_idx", "uv" }, &VEC4_TYPE)
-    add_intrinsic("texture_store", { &TEXTURE_RW_ID_TYPE, &VEC2_TYPE, &VEC4_TYPE }, { "tex_idx", "coord", "value" }, nil)
-    add_intrinsic("texture_load", { &TEXTURE_RW_ID_TYPE, &VEC2_TYPE }, { "tex_idx", "coord" }, &VEC4_TYPE)
-    add_intrinsic("texture_size", { &TEXTURE_ID_TYPE, &SAMPLER_ID_TYPE, &INT_TYPE }, { "tex_idx", "sampler_idx", "lod" }, &VEC2_TYPE)
-    add_intrinsic("texture_size", { &TEXTURE_RW_ID_TYPE }, { "tex_idx" }, &VEC2_TYPE, glsl_name = "image_size")
+    add_intrinsic("texture_store", { &TEXTURE_RW_ID_TYPE, &IVEC2_TYPE, &VEC4_TYPE }, { "tex_idx", "coord", "value" }, nil)
+    add_intrinsic("texture_load", { &TEXTURE_RW_ID_TYPE, &IVEC2_TYPE }, { "tex_idx", "coord" }, &VEC4_TYPE)
+    add_intrinsic("texture_size", { &TEXTURE_ID_TYPE, &SAMPLER_ID_TYPE, &INT_TYPE }, { "tex_idx", "sampler_idx", "lod" }, &IVEC2_TYPE)
+    add_intrinsic("texture_size", { &TEXTURE_RW_ID_TYPE }, { "tex_idx" }, &IVEC2_TYPE, glsl_name = "image_size")
 
     // Raytracing
-    ray_result_type := add_intrinsic_struct("Ray_Result", { &UINT_TYPE, &FLOAT_TYPE, &UINT_TYPE, &UINT_TYPE, &VEC2_TYPE, &BOOL_TYPE, &MAT4_TYPE, &MAT4_TYPE }, { "kind", "t", "instance_idx", "primitive_idx", "barycentrics", "front_face", "object_to_world", "world_to_object" })
+    ray_result_type := add_intrinsic_struct("Ray_Result", { &UINT_TYPE, &FLOAT_TYPE, &UINT_TYPE, &UINT_TYPE, &VEC2_TYPE, &BOOL_TYPE, &MAT4x3_TYPE, &MAT4x3_TYPE }, { "kind", "t", "instance_idx", "primitive_idx", "barycentrics", "front_face", "object_to_world", "world_to_object" })
     ray_desc_type := add_intrinsic_struct("Ray_Desc", { &UINT_TYPE, &UINT_TYPE, &FLOAT_TYPE, &FLOAT_TYPE, &VEC3_TYPE, &VEC3_TYPE }, { "flags", "cull_mask", "t_min", "t_max", "origin", "dir" })
     add_intrinsic("rayquery_init", { ray_desc_type, &BVH_ID_TYPE }, { "desc", "bvh" }, &RAYQUERY_TYPE)
     add_intrinsic("rayquery_proceed", { &RAYQUERY_TYPE }, { "rq" }, &BOOL_TYPE)
@@ -616,25 +816,22 @@ add_intrinsics :: proc()
     // Conversion
     add_intrinsic("float_bits_to_int", { &FLOAT_TYPE }, { "x" }, &UINT_TYPE, glsl_name = "floatBitsToInt")
 
+    // Boolean vector manipulation
+    add_intrinsic("all", { &BVEC2_TYPE }, { "x" }, &BOOL_TYPE)
+    add_intrinsic("all", { &BVEC3_TYPE }, { "x" }, &BOOL_TYPE)
+    add_intrinsic("all", { &BVEC4_TYPE }, { "x" }, &BOOL_TYPE)
+    add_intrinsic("any", { &BVEC2_TYPE }, { "x" }, &BOOL_TYPE)
+    add_intrinsic("any", { &BVEC3_TYPE }, { "x" }, &BOOL_TYPE)
+    add_intrinsic("any", { &BVEC4_TYPE }, { "x" }, &BOOL_TYPE)
+    add_intrinsic("not", { &BVEC2_TYPE }, { "x" }, &BVEC2_TYPE)
+    add_intrinsic("not", { &BVEC3_TYPE }, { "x" }, &BVEC3_TYPE)
+    add_intrinsic("not", { &BVEC4_TYPE }, { "x" }, &BVEC4_TYPE)
+
     // Constructors
-    add_intrinsic("uint", { &FLOAT_TYPE }, { "x" }, &UINT_TYPE)
-    add_intrinsic("uint", { &UINT_TYPE }, { "x" }, &UINT_TYPE)
-    add_intrinsic("uint", { &INT_TYPE }, { "x" }, &UINT_TYPE)
-    add_intrinsic("int", { &FLOAT_TYPE }, { "x" }, &INT_TYPE)
-    add_intrinsic("int", { &UINT_TYPE }, { "x" }, &INT_TYPE)
-    add_intrinsic("int", { &INT_TYPE }, { "x" }, &INT_TYPE)
-    add_intrinsic("float", { &FLOAT_TYPE }, { "x" }, &FLOAT_TYPE)
-    add_intrinsic("float", { &INT_TYPE }, { "x" }, &FLOAT_TYPE)
-    add_intrinsic("float", { &UINT_TYPE }, { "x" }, &FLOAT_TYPE)
-    add_intrinsic("float", { &BOOL_TYPE }, { "x" }, &FLOAT_TYPE)
-    add_intrinsic("vec2", { &FLOAT_TYPE }, { "x" }, &VEC2_TYPE)
     add_intrinsic("vec2", { &FLOAT_TYPE, &FLOAT_TYPE }, { "x", "y" }, &VEC2_TYPE)
-    add_intrinsic("vec2", { &VEC2_TYPE }, { "x" }, &VEC2_TYPE)
     add_intrinsic("vec3", { &FLOAT_TYPE, &FLOAT_TYPE, &FLOAT_TYPE }, { "x", "y", "z" }, &VEC3_TYPE)
     add_intrinsic("vec3", { &VEC2_TYPE, &FLOAT_TYPE }, { "x", "y" }, &VEC3_TYPE)
     add_intrinsic("vec3", { &FLOAT_TYPE, &VEC2_TYPE }, { "x", "y" }, &VEC3_TYPE)
-    add_intrinsic("vec3", { &FLOAT_TYPE }, { "x" }, &VEC3_TYPE)
-    add_intrinsic("vec3", { &VEC3_TYPE }, { "x" }, &VEC3_TYPE)
     add_intrinsic("vec4", { &FLOAT_TYPE, &FLOAT_TYPE, &FLOAT_TYPE, &FLOAT_TYPE }, { "x", "y", "z", "w" }, &VEC4_TYPE)
     add_intrinsic("vec4", { &VEC3_TYPE, &FLOAT_TYPE }, { "x", "y" }, &VEC4_TYPE)
     add_intrinsic("vec4", { &FLOAT_TYPE, &VEC3_TYPE }, { "x", "y" }, &VEC4_TYPE)
@@ -642,7 +839,6 @@ add_intrinsics :: proc()
     add_intrinsic("vec4", { &FLOAT_TYPE, &FLOAT_TYPE, &VEC2_TYPE }, { "x", "y", "z" }, &VEC4_TYPE)
     add_intrinsic("vec4", { &VEC2_TYPE, &FLOAT_TYPE, &FLOAT_TYPE }, { "x", "y", "z" }, &VEC4_TYPE)
     add_intrinsic("vec4", { &FLOAT_TYPE, &VEC2_TYPE, &FLOAT_TYPE }, { "x", "y", "z" }, &VEC4_TYPE)
-    add_intrinsic("vec4", { &FLOAT_TYPE }, { "x" }, &VEC4_TYPE)
     add_intrinsic("mat4", { &VEC4_TYPE, &VEC4_TYPE, &VEC4_TYPE, &VEC4_TYPE }, { "x", "y", "z", "w" }, &MAT4_TYPE)
 
     // Math functions - these work on float, vec2, vec3, vec4 (component-wise)
@@ -737,7 +933,15 @@ add_intrinsics :: proc()
     add_intrinsic("smoothstep", { &FLOAT_TYPE, &FLOAT_TYPE, &VEC4_TYPE }, { "edge0", "edge1", "x" }, &VEC4_TYPE)
 
     // Matrix manipulation
+    add_intrinsic("transpose", { &MAT2_TYPE }, { "m" }, &MAT2_TYPE)
+    add_intrinsic("transpose", { &MAT2x3_TYPE }, { "m" }, &MAT3x2_TYPE)
+    add_intrinsic("transpose", { &MAT2x4_TYPE }, { "m" }, &MAT4x2_TYPE)
+    add_intrinsic("transpose", { &MAT3_TYPE }, { "m" }, &MAT3_TYPE)
+    add_intrinsic("transpose", { &MAT3x2_TYPE }, { "m" }, &MAT2x3_TYPE)
+    add_intrinsic("transpose", { &MAT3x4_TYPE }, { "m" }, &MAT4x3_TYPE)
     add_intrinsic("transpose", { &MAT4_TYPE }, { "m" }, &MAT4_TYPE)
+    add_intrinsic("transpose", { &MAT4x2_TYPE }, { "m" }, &MAT2x4_TYPE)
+    add_intrinsic("transpose", { &MAT4x3_TYPE }, { "m" }, &MAT3x4_TYPE)
 
     // Misc
     add_intrinsic("printf", { &STRING_TYPE }, { "fmt" }, is_variadic = true)
@@ -762,7 +966,7 @@ add_intrinsic :: proc(name: string, args: []^Ast_Type, names: []string, ret: ^As
     decl.type.args = arg_decls
     decl.type.ret = ret
     decl.type.is_variadic = is_variadic
-    decl.glsl_name = glsl_name
+    decl.glsl_name = glsl_name if glsl_name != "" else decl.name
     append(&INTRINSICS, decl)
 }
 
@@ -780,6 +984,7 @@ add_intrinsic_struct :: proc(name: string, members: []^Ast_Type, names: []string
 
     decl := new(Ast_Decl)
     decl.name = name
+    decl.glsl_name = ident_to_glsl(name)
     decl.type = new(Ast_Type)
     decl.type.kind = .Struct
     decl.type.members = member_decls
@@ -789,6 +994,7 @@ add_intrinsic_struct :: proc(name: string, members: []^Ast_Type, names: []string
     label_type.kind = .Label
     label_type.name = { text = name, type = .Ident, col_start = 0, line = 0 }
     label_type.base = decl.type
+    label_type.decl = decl
     return label_type
 }
 
@@ -799,13 +1005,15 @@ bin_op_result_type :: proc(op: Ast_Binary_Op, type1: ^Ast_Type, type2: ^Ast_Type
         return &POISON_TYPE, true
     }
 
-    if op == .Mul && type1.primitive_kind == .Mat4
+    if op == .Mul && type1.primitive_kind == .Matrix
     {
-        if type2.primitive_kind == .Vec4 do return &VEC4_TYPE, true
+        match_dims := type1.dimensions.x == type2.dimensions.x
+        if match_dims && same_type(type1.base, type2.base) do return make_vec_type(type1.base, type1.dimensions.y), true
     }
-    else if op == .Mul && type1.primitive_kind == .Vec4
+    else if op == .Mul && type1.primitive_kind == .Vector
     {
-        if type2.primitive_kind == .Mat4 do return &VEC4_TYPE, true
+        match_dims := type1.dimensions.x == type2.dimensions.y
+        if match_dims && same_type(type1.base, type2.base) do return make_vec_type(type2.base, type2.dimensions.x), true
     }
 
     is_bit_manip := op == .Bitwise_And ||
@@ -828,8 +1036,19 @@ bin_op_result_type :: proc(op: Ast_Binary_Op, type1: ^Ast_Type, type2: ^Ast_Type
                   op == .NEQ
     if is_compare
     {
-        if type_implicit_convert(type1, type2) || type_implicit_convert(type2, type1) do return &BOOL_TYPE, true
-        else do return &POISON_TYPE, false
+        if type1.primitive_kind == .Vector && type2.primitive_kind == .Vector
+        {
+            if type1.dimensions == type2.dimensions && same_type(type1.base, type2.base) {
+                return make_vec_type(&BOOL_TYPE, type1.dimensions.x), true
+            }
+
+            return &POISON_TYPE, false
+        }
+        else
+        {
+            if type_implicit_convert(type1, type2) || type_implicit_convert(type2, type1) do return &BOOL_TYPE, true
+            return &POISON_TYPE, false
+        }
     }
 
     // Commutative properties here.
@@ -844,17 +1063,11 @@ bin_op_result_type :: proc(op: Ast_Binary_Op, type1: ^Ast_Type, type2: ^Ast_Type
         if t1.primitive_kind == .Untyped_Int && (t2.primitive_kind == .Uint || t2.primitive_kind == .Int) {
             return t2, true
         }
-        if type_implicit_convert(t1, &FLOAT_TYPE) && t2.primitive_kind == .Vec2 {
-            return t2, true
-        }
-        if type_implicit_convert(t1, &FLOAT_TYPE) && t2.primitive_kind == .Vec3 {
-            return t2, true
-        }
-        if type_implicit_convert(t1, &FLOAT_TYPE) && t2.primitive_kind == .Vec4 {
-            return t2, true
-        }
         if (op == .Add || op == .Minus) && type_is_resource_id(t1) && (type_implicit_convert(t2, &UINT_TYPE) || type_implicit_convert(t2, &INT_TYPE)) {
             return t1, true
+        }
+        if t2.primitive_kind == .Vector && type_implicit_convert(t1, t2.base) {
+            return t2, true
         }
     }
 
@@ -901,13 +1114,7 @@ if_expr_result_type :: proc(then_type: ^Ast_Type, else_type: ^Ast_Type) -> ^Ast_
         if t1.primitive_kind == .Untyped_Int && (t2.primitive_kind == .Uint || t2.primitive_kind == .Int) {
             return t2
         }
-        if type_implicit_convert(t1, &FLOAT_TYPE) && t2.primitive_kind == .Vec2 {
-            return t2
-        }
-        if type_implicit_convert(t1, &FLOAT_TYPE) && t2.primitive_kind == .Vec3 {
-            return t2
-        }
-        if type_implicit_convert(t1, &FLOAT_TYPE) && t2.primitive_kind == .Vec4 {
+        if type_implicit_convert(t1, &FLOAT_TYPE) && t2.primitive_kind == .Vector {
             return t2
         }
     }
@@ -920,6 +1127,31 @@ type_cast_allowed :: proc(from: ^Ast_Type, to: ^Ast_Type) -> bool
 {
     if type_implicit_convert(from, to) do return true
 
+    if type_implicit_convert(from, &BOOL_TYPE) && type_implicit_convert(to, &FLOAT_TYPE) {
+        return true
+    }
+    if type_implicit_convert(from, &BOOL_TYPE) && type_implicit_convert(to, &INT_TYPE) {
+        return true
+    }
+    if type_implicit_convert(from, &BOOL_TYPE) && type_implicit_convert(to, &UINT_TYPE) {
+        return true
+    }
+    if type_implicit_convert(from, &FLOAT_TYPE) && type_implicit_convert(to, &VEC2_TYPE) {
+        return true
+    }
+    if type_implicit_convert(from, &FLOAT_TYPE) && type_implicit_convert(to, &VEC3_TYPE) {
+        return true
+    }
+    if type_implicit_convert(from, &FLOAT_TYPE) && type_implicit_convert(to, &VEC4_TYPE) {
+        return true
+    }
+    if from.primitive_kind == .Vector && to.primitive_kind == .Vector {
+        return from.dimensions == to.dimensions && type_cast_allowed(from.base, to.base)
+    }
+    if from.primitive_kind == .Matrix && to.primitive_kind == .Matrix {
+        return from.dimensions == to.dimensions && type_cast_allowed(from.base, to.base)
+    }
+
     for i in 0..<2
     {
         t1 := from if i == 0 else to
@@ -928,13 +1160,10 @@ type_cast_allowed :: proc(from: ^Ast_Type, to: ^Ast_Type) -> bool
         if type_implicit_convert(t1, &FLOAT_TYPE) && type_implicit_convert(t2, &INT_TYPE) {
             return true
         }
+        if type_implicit_convert(t1, &INT_TYPE) && type_implicit_convert(t2, &UINT_TYPE) {
+            return true
+        }
         if type_implicit_convert(t1, &FLOAT_TYPE) && type_implicit_convert(t2, &UINT_TYPE) {
-            return true
-        }
-        if type_implicit_convert(t1, &VEC2_TYPE) && type_implicit_convert(t2, &VEC4_TYPE) {
-            return true
-        }
-        if type_implicit_convert(t1, &VEC3_TYPE) && type_implicit_convert(t2, &VEC4_TYPE) {
             return true
         }
     }
@@ -1035,13 +1264,11 @@ handle_vector_swizzle :: proc(expr_type: ^Ast_Type, str: string) -> (res: ^Ast_T
     if str == "" do return &POISON_TYPE, false
     if len(str) > 4 do return &POISON_TYPE, false
 
-    el_count: int
+    el_count: u32
     #partial switch expr_type.primitive_kind
     {
         case .Float: el_count = 1
-        case .Vec2: el_count = 2
-        case .Vec3: el_count = 3
-        case .Vec4: el_count = 4
+        case .Vector: el_count = expr_type.dimensions.x
         case: return &POISON_TYPE, false
     }
 
@@ -1086,13 +1313,10 @@ handle_vector_swizzle :: proc(expr_type: ^Ast_Type, str: string) -> (res: ^Ast_T
         }
     }
 
-    switch len(str)
-    {
-        case 1: return &FLOAT_TYPE, true
-        case 2: return &VEC2_TYPE, true
-        case 3: return &VEC3_TYPE, true
-        case 4: return &VEC4_TYPE, true
-        case: panic("Unreachable")
+    if len(str) == 1 {
+        return expr_type.base if expr_type.base != nil else expr_type, true
+    } else {
+        return make_vec_type(expr_type.base, u32(len(str))), true
     }
 }
 
@@ -1110,13 +1334,43 @@ type_is_resource_id :: proc(type: ^Ast_Type) -> bool
         case .Texture_ID:    return true
         case .Texture_RW_ID: return true
         case .Sampler_ID:    return true
-        case .Vec2:          return false
-        case .Vec3:          return false
-        case .Vec4:          return false
-        case .Mat4:          return false
+        case .Vector:        return false
+        case .Matrix:        return false
         case .String:        return false
         case .Ray_Query:     return false
         case .BVH_ID:        return true
     }
     return {}
+}
+
+check_assign_lhs :: proc(using c: ^Checker, expr: ^Ast_Expr) -> bool
+{
+    // Check expression kind first
+    kind_ok: bool
+    switch derived in expr.derived_expr
+    {
+        case ^Ast_Binary_Expr:   kind_ok = false
+        case ^Ast_Unary_Expr:    kind_ok = false
+        case ^Ast_Member_Access: kind_ok = true
+        case ^Ast_Array_Access:  kind_ok = true
+        case ^Ast_Ident_Expr:    kind_ok = true
+        case ^Ast_Lit_Expr:      kind_ok = false
+        case ^Ast_Call:          kind_ok = false
+        case ^Ast_If_Expr:       kind_ok = false
+        case ^Ast_Cast:          kind_ok = false
+    }
+
+    if !kind_ok {
+        typecheck_error(c, expr.token, "This expression is not an l-value, therefore it can't be assigned to.")
+        return false
+    }
+
+    // Check expression constness
+    if expr.is_const
+    {
+        typecheck_error(c, expr.token, "Pointers and slices are immutable by default, use 'mut^ T' and 'mut[] T' for mutability. Mutability affects performance.")
+        return false
+    }
+
+    return true
 }

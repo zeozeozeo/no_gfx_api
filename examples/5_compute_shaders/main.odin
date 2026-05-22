@@ -51,9 +51,9 @@ main :: proc()
 
     group_size_x := u32(8)
     group_size_y := u32(8)
-    compute_shader := gpu.shader_create_compute(#load("shaders/test.comp.spv", []u32), group_size_x, group_size_y, 1)
-    vert_shader := gpu.shader_create(#load("shaders/test.vert.spv", []u32), .Vertex)
-    frag_shader := gpu.shader_create(#load("shaders/test.frag.spv", []u32), .Fragment)
+    compute_shader := gpu.shader_create_compute(#load("shaders/shadertoy.comp.spv", []u32), group_size_x, group_size_y, 1)
+    vert_shader := gpu.shader_create(#load("shaders/shader.vert.spv", []u32), .Vertex)
+    frag_shader := gpu.shader_create(#load("shaders/shader.frag.spv", []u32), .Fragment)
     defer {
         gpu.shader_destroy(compute_shader)
         gpu.shader_destroy(vert_shader)
@@ -84,7 +84,6 @@ main :: proc()
 
     Compute_Data :: struct {
         output_texture_id: u32,
-        resolution: [2]f32,
         time: f32,
     }
 
@@ -179,7 +178,6 @@ main :: proc()
         // Allocate compute data for this frame with current time and resolution
         compute_data := gpu.arena_alloc(frame_arena, Compute_Data)
         compute_data.cpu.output_texture_id = texture_rw_id
-        compute_data.cpu.resolution = { f32(window_size_x), f32(window_size_y) }
         compute_data.cpu.time = total_time
 
         cmd_buf := gpu.commands_begin(.Main)

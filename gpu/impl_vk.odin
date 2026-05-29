@@ -1591,7 +1591,8 @@ get_or_add_sampler :: proc(info: vk.SamplerCreateInfo) -> vk.Sampler
     return sampler
 }
 
-_texture_view_descriptor :: proc(texture: Texture, view_desc: Texture_View_Desc, loc := #caller_location) -> Texture_Descriptor
+/*
+_texture_descriptor :: proc(texture: Texture, view_desc: Texture_View_Desc, loc := #caller_location) -> Texture_Descriptor
 {
     if ctx.validation
     {
@@ -1633,7 +1634,7 @@ _texture_view_descriptor :: proc(texture: Texture, view_desc: Texture_View_Desc,
     return desc
 }
 
-_texture_rw_view_descriptor :: proc(texture: Texture, view_desc: Texture_View_Desc, loc := #caller_location) -> Texture_Descriptor
+_texture_rw_descriptor :: proc(texture: Texture, view_desc: Texture_View_Desc, loc := #caller_location) -> Texture_Descriptor
 {
     if ctx.validation
     {
@@ -1710,6 +1711,106 @@ _sampler_descriptor :: proc(sampler_desc: Sampler_Desc, loc := #caller_location)
     vk.GetDescriptorEXT(ctx.device, &info, int(ctx.sampler_desc_size), &desc)
     return desc
 }
+*/
+
+_texture_descriptor :: proc(texture: Texture, view_desc: Texture_View_Desc, loc := #caller_location) -> Texture_Descriptor
+{
+    if ctx.validation
+    {
+        ok := true
+        ok &= pool_check(&ctx.textures, texture.handle, "texture", loc)
+        if !ok do return {}
+    }
+
+    tex_info := pool_get(&ctx.textures, texture.handle)
+    vk_image := tex_info.handle
+
+    format := view_desc.format
+    if format == .Default {
+        format = texture.format
+    }
+
+    plane_aspect: vk.ImageAspectFlags = { .DEPTH } if format == .D32_Float else { .COLOR }
+
+    image_view_ci := vk.ImageViewCreateInfo {
+        sType = .IMAGE_VIEW_CREATE_INFO,
+        image = vk_image,
+        viewType = to_vk_texture_view_type(view_desc.type),
+        format = to_vk_texture_format(format),
+        subresourceRange = {
+            aspectMask = plane_aspect,
+            levelCount = texture.mip_count,
+            layerCount = 1,
+        }
+    }
+    view := get_or_add_image_view(texture.handle, image_view_ci)
+
+    return { transmute(u64) texture.handle, cast(u64) view }
+}
+
+_texture_rw_descriptor :: proc(texture: Texture, view_desc: Texture_View_Desc, loc := #caller_location) -> Texture_Descriptor
+{
+    if ctx.validation
+    {
+        ok := true
+        ok &= pool_check(&ctx.textures, texture.handle, "texture", loc)
+        if !ok do return {}
+    }
+
+    tex_info := pool_get(&ctx.textures, texture.handle)
+    vk_image := tex_info.handle
+
+    format := view_desc.format
+    if format == .Default {
+        format = texture.format
+    }
+
+    plane_aspect: vk.ImageAspectFlags = { .DEPTH } if format == .D32_Float else { .COLOR }
+
+    image_view_ci := vk.ImageViewCreateInfo {
+        sType = .IMAGE_VIEW_CREATE_INFO,
+        image = vk_image,
+        viewType = to_vk_texture_view_type(view_desc.type),
+        format = to_vk_texture_format(format),
+        subresourceRange = {
+            aspectMask = plane_aspect,
+            levelCount = 1,
+            layerCount = 1,
+        }
+    }
+    view := get_or_add_image_view(texture.handle, image_view_ci)
+
+    return { transmute(u64) texture.handle, cast(u64) view }
+}
+
+_sampler_descriptor :: proc(sampler_desc: Sampler_Desc, loc := #caller_location) -> Sampler_Descriptor
+{
+    if sampler_desc.max_anisotropy != 0.0 {
+        ensure(
+            sampler_desc.max_anisotropy >= 1.0 &&
+            sampler_desc.max_anisotropy <= ctx.physical_properties.props2.properties.limits.maxSamplerAnisotropy,
+            "Sampler anisotropy out of range. Call gpu.device_limits() to get the supported maximum anisotropy.",
+        )
+    }
+
+    sampler_ci := vk.SamplerCreateInfo {
+        sType = .SAMPLER_CREATE_INFO,
+        magFilter = to_vk_filter(sampler_desc.mag_filter),
+        minFilter = to_vk_filter(sampler_desc.min_filter),
+        mipmapMode = to_vk_mipmap_filter(sampler_desc.mip_filter),
+        addressModeU = to_vk_address_mode(sampler_desc.address_mode_u),
+        addressModeV = to_vk_address_mode(sampler_desc.address_mode_v),
+        addressModeW = to_vk_address_mode(sampler_desc.address_mode_w),
+        mipLodBias = sampler_desc.mip_lod_bias,
+        minLod = sampler_desc.min_lod,
+        maxLod = sampler_desc.max_lod if sampler_desc.max_lod != 0.0 else vk.LOD_CLAMP_NONE,
+        anisotropyEnable = b32(sampler_desc.max_anisotropy > 1.0),
+        maxAnisotropy = sampler_desc.max_anisotropy,
+    }
+    sampler := get_or_add_sampler(sampler_ci)
+
+    return transmute(Sampler_Descriptor) sampler
+}
 
 _desc_heap_create :: proc(name := "", loc := #caller_location) -> Descriptor_Heap
 {
@@ -1751,14 +1852,15 @@ _desc_heap_destroy :: proc(heap: Descriptor_Heap, loc := #caller_location)
     pool_remove(&ctx.desc_heaps, heap)
 }
 
-_desc_heap_set_textures :: proc(heap: Descriptor_Heap, start_idx: u32, textures: []Texture, views: []Texture_View_Desc, loc := #caller_location)
+_desc_heap_set_textures :: proc(heap: Descriptor_Heap, start_idx: u32, textures: []Texture_Descriptor, loc := #caller_location)
 {
-    assert(len(textures) == len(views))
-
     if ctx.validation
     {
         ok := true
         ok &= pool_check(&ctx.desc_heaps, heap, "heap", loc)
+        for desc, i in textures {
+            ok &= check_texture_descriptor(desc, "textures", i, loc)
+        }
         if !ok do return
     }
 
@@ -1768,35 +1870,9 @@ _desc_heap_set_textures :: proc(heap: Descriptor_Heap, start_idx: u32, textures:
     image_infos := make([]vk.DescriptorImageInfo, len(textures), allocator = scratch)
     for &info, i in image_infos
     {
-        view_desc := views[i]
-        texture := textures[i]
-
-        tex_info := pool_get(&ctx.textures, texture.handle)
-        vk_image := tex_info.handle
-
-        format := view_desc.format
-        if format == .Default {
-            format = texture.format
-        }
-
-        plane_aspect: vk.ImageAspectFlags = { .DEPTH } if format == .D32_Float else { .COLOR }
-
-        image_view_ci := vk.ImageViewCreateInfo {
-            sType = .IMAGE_VIEW_CREATE_INFO,
-            image = vk_image,
-            viewType = to_vk_texture_view_type(view_desc.type),
-            format = to_vk_texture_format(format),
-            subresourceRange = {
-                aspectMask = plane_aspect,
-                levelCount = texture.mip_count,
-                layerCount = 1,
-            }
-        }
-        view := get_or_add_image_view(texture.handle, image_view_ci)
-
         info = {
             sampler = {},
-            imageView = view,
+            imageView = texture_descriptor_get_vk_view(textures[i]),
             imageLayout = .GENERAL,
         }
     }
@@ -1813,7 +1889,7 @@ _desc_heap_set_textures :: proc(heap: Descriptor_Heap, start_idx: u32, textures:
     vk.UpdateDescriptorSets(ctx.device, 1, &write, 0, nil)
 }
 
-_desc_heap_set_textures_rw :: proc(heap: Descriptor_Heap, start_idx: u32, textures: []Texture, views: []Texture_View_Desc, loc := #caller_location)
+_desc_heap_set_textures_rw :: proc(heap: Descriptor_Heap, start_idx: u32, textures: []Texture_Descriptor, loc := #caller_location)
 {
     if ctx.validation
     {
@@ -1828,35 +1904,9 @@ _desc_heap_set_textures_rw :: proc(heap: Descriptor_Heap, start_idx: u32, textur
     image_infos := make([]vk.DescriptorImageInfo, len(textures), allocator = scratch)
     for &info, i in image_infos
     {
-        view_desc := views[i]
-        texture := textures[i]
-
-        tex_info := pool_get(&ctx.textures, texture.handle)
-        vk_image := tex_info.handle
-
-        format := view_desc.format
-        if format == .Default {
-            format = texture.format
-        }
-
-        plane_aspect: vk.ImageAspectFlags = { .DEPTH } if format == .D32_Float else { .COLOR }
-
-        image_view_ci := vk.ImageViewCreateInfo {
-            sType = .IMAGE_VIEW_CREATE_INFO,
-            image = vk_image,
-            viewType = to_vk_texture_view_type(view_desc.type),
-            format = to_vk_texture_format(format),
-            subresourceRange = {
-                aspectMask = plane_aspect,
-                levelCount = texture.mip_count,
-                layerCount = 1,
-            }
-        }
-        view := get_or_add_image_view(texture.handle, image_view_ci)
-
         info = {
             sampler = {},
-            imageView = view,
+            imageView = texture_descriptor_get_vk_view(textures[i]),
             imageLayout = .GENERAL,
         }
     }
@@ -1873,7 +1923,7 @@ _desc_heap_set_textures_rw :: proc(heap: Descriptor_Heap, start_idx: u32, textur
     vk.UpdateDescriptorSets(ctx.device, 1, &write, 0, nil)
 }
 
-_desc_heap_set_samplers :: proc(heap: Descriptor_Heap, start_idx: u32, samplers: []Sampler_Desc, loc := #caller_location)
+_desc_heap_set_samplers :: proc(heap: Descriptor_Heap, start_idx: u32, samplers: []Sampler_Descriptor, loc := #caller_location)
 {
     if ctx.validation
     {
@@ -1888,25 +1938,8 @@ _desc_heap_set_samplers :: proc(heap: Descriptor_Heap, start_idx: u32, samplers:
     sampler_infos := make([]vk.DescriptorImageInfo, len(samplers), allocator = scratch)
     for &info, i in sampler_infos
     {
-        sampler_desc := samplers[i]
-        sampler_ci := vk.SamplerCreateInfo {
-            sType = .SAMPLER_CREATE_INFO,
-            magFilter = to_vk_filter(sampler_desc.mag_filter),
-            minFilter = to_vk_filter(sampler_desc.min_filter),
-            mipmapMode = to_vk_mipmap_filter(sampler_desc.mip_filter),
-            addressModeU = to_vk_address_mode(sampler_desc.address_mode_u),
-            addressModeV = to_vk_address_mode(sampler_desc.address_mode_v),
-            addressModeW = to_vk_address_mode(sampler_desc.address_mode_w),
-            mipLodBias = sampler_desc.mip_lod_bias,
-            minLod = sampler_desc.min_lod,
-            maxLod = sampler_desc.max_lod if sampler_desc.max_lod != 0.0 else vk.LOD_CLAMP_NONE,
-            anisotropyEnable = b32(sampler_desc.max_anisotropy > 1.0),
-            maxAnisotropy = sampler_desc.max_anisotropy,
-        }
-        sampler := get_or_add_sampler(sampler_ci)
-
         info = {
-            sampler = sampler,
+            sampler = transmute(vk.Sampler) samplers[i],
             imageView = {},
             imageLayout = {},
         }
@@ -2679,11 +2712,24 @@ _cmd_set_desc_heap_2 :: proc(cmd_buf: Command_Buffer, heap: Descriptor_Heap, loc
     if ctx.validation
     {
         ok := true
+        ok &= pool_check(&ctx.command_buffers, cmd_buf, "cmd_buf", loc)
         ok &= pool_check(&ctx.desc_heaps, heap, "heap", loc)
         if !ok do return
     }
 
+    cmd_buf_info := pool_get(&ctx.command_buffers, cmd_buf)
+    vk_cmd_buf := cmd_buf_info.handle
 
+    heap_info := pool_get(&ctx.desc_heaps, heap)
+
+    sets := [4]vk.DescriptorSet {
+        heap_info.textures,
+        heap_info.textures_rw,
+        heap_info.samplers,
+        heap_info.bvhs,
+    }
+    vk.CmdBindDescriptorSets(vk_cmd_buf, .GRAPHICS, ctx.common_pipeline_layout_graphics, 0, u32(len(ctx.desc_layouts)), &sets[0], 0, nil)
+    vk.CmdBindDescriptorSets(vk_cmd_buf, .COMPUTE, ctx.common_pipeline_layout_compute, 0, u32(len(ctx.desc_layouts)), &sets[0], 0, nil)
 }
 
 _cmd_add_wait_semaphore :: proc(cmd_buf: Command_Buffer, sem: Semaphore, wait_value: u64, loc := #caller_location)
@@ -4100,6 +4146,29 @@ check_bvh_must_be_blas :: proc(bvh: BVH, name: string, loc: runtime.Source_Code_
     }
 
     return true
+}
+
+@(private="file")
+check_texture_descriptor :: proc(desc: Texture_Descriptor, name: string, index: int, loc: runtime.Source_Code_Location) -> bool
+{
+    if !pool_check_no_message(&ctx.textures, texture_descriptor_get_handle(desc)) {
+        log.errorf("'%v[%v]' texture descriptor is stale, the underlying texture has been freed.", name, index, location = loc)
+        return false
+    }
+
+    return true
+}
+
+@(private="file")
+texture_descriptor_get_handle :: #force_inline proc(desc: Texture_Descriptor) -> Texture_Handle
+{
+    return transmute(Texture_Handle) (cast([2]u64)desc)[0]
+}
+
+@(private="file")
+texture_descriptor_get_vk_view :: #force_inline proc(desc: Texture_Descriptor) -> vk.ImageView
+{
+    return cast(vk.ImageView) (cast([2]u64)desc)[1]
 }
 
 vk_set_debug_name :: proc(name: string, handle: u64, type: vk.ObjectType)

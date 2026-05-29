@@ -18,15 +18,19 @@ import vk "vendor:vulkan"
 
 // Handles
 Handle :: rawptr
+Big_Handle :: [2]u64
 Texture_Handle :: distinct Handle
 Command_Buffer :: distinct Handle
 Semaphore :: distinct Handle
 Shader :: distinct Handle
 BVH :: struct { _: Handle }
 Descriptor_Heap :: distinct Handle
-Texture_Descriptor :: struct { bytes: [8]u64 }
-Sampler_Descriptor :: struct { bytes: [4]u64 }
-BVH_Descriptor :: struct { bytes: [4]u64 }
+//Texture_Descriptor :: struct { bytes: [8]u64 }
+//Sampler_Descriptor :: struct { bytes: [4]u64 }
+//BVH_Descriptor :: struct { bytes: [4]u64 }
+Texture_Descriptor :: distinct Big_Handle
+Sampler_Descriptor :: distinct Handle
+BVH_Descriptor :: struct { _bytes: [4]u64 }
 
 // Enums
 Feature :: enum { Raytracing = 0 }
@@ -310,20 +314,22 @@ mem_free_raw: proc(addr: gpuptr, loc := #caller_location) : _mem_free_raw
 texture_size_and_align: proc(desc: Texture_Desc, loc := #caller_location) -> (size: u64, align: u64) : _texture_size_and_align
 texture_create: proc(desc: Texture_Desc, storage: gpuptr, queue: Queue = nil, signal_sem: Semaphore = {}, signal_value: u64 = 0, name := "", loc := #caller_location) -> Texture : _texture_create
 texture_destroy: proc(texture: Texture, loc := #caller_location) : _texture_destroy
-texture_view_descriptor: proc(texture: Texture, view_desc: Texture_View_Desc, loc := #caller_location) -> Texture_Descriptor : _texture_view_descriptor
-texture_rw_view_descriptor: proc(texture: Texture, view_desc: Texture_View_Desc, loc := #caller_location) -> Texture_Descriptor : _texture_rw_view_descriptor
-sampler_descriptor: proc(sampler_desc: Sampler_Desc, loc := #caller_location) -> Sampler_Descriptor : _sampler_descriptor
-texture_view_descriptor_size: proc() -> u32 : _texture_view_descriptor_size
-texture_rw_view_descriptor_size: proc() -> u32 : _texture_rw_view_descriptor_size
-sampler_descriptor_size: proc() -> u32 : _sampler_descriptor_size
 
 // Descriptors
 desc_heap_create: proc(name := "", loc := #caller_location) -> Descriptor_Heap : _desc_heap_create
 desc_heap_destroy: proc(heap: Descriptor_Heap, loc := #caller_location) : _desc_heap_destroy
-desc_heap_set_textures: proc(heap: Descriptor_Heap, start_idx: u32, textures: []Texture, view: []Texture_View_Desc, loc := #caller_location) : _desc_heap_set_textures
-desc_heap_set_textures_rw: proc(heap: Descriptor_Heap, start_idx: u32, textures: []Texture, views: []Texture_View_Desc, loc := #caller_location) : _desc_heap_set_textures_rw
-desc_heap_set_samplers : proc(heap: Descriptor_Heap, start_idx: u32, samplers: []Sampler_Desc, loc := #caller_location) : _desc_heap_set_samplers
+desc_heap_set_textures: proc(heap: Descriptor_Heap, start_idx: u32, textures: []Texture_Descriptor, loc := #caller_location) : _desc_heap_set_textures
+desc_heap_set_textures_rw: proc(heap: Descriptor_Heap, start_idx: u32, textures: []Texture_Descriptor, loc := #caller_location) : _desc_heap_set_textures_rw
+desc_heap_set_samplers : proc(heap: Descriptor_Heap, start_idx: u32, samplers: []Sampler_Descriptor, loc := #caller_location) : _desc_heap_set_samplers
 desc_heap_set_bvhs: proc(heap: Descriptor_Heap, start_idx: u32, bvhs: []BVH, loc := #caller_location) : _desc_heap_set_bvhs
+texture_view_descriptor: proc(texture: Texture, view_desc: Texture_View_Desc, loc := #caller_location) -> Texture_Descriptor : _texture_descriptor
+texture_rw_view_descriptor: proc(texture: Texture, view_desc: Texture_View_Desc, loc := #caller_location) -> Texture_Descriptor : _texture_rw_descriptor
+sampler_descriptor: proc(sampler_desc: Sampler_Desc, loc := #caller_location) -> Sampler_Descriptor : _sampler_descriptor
+
+// @tmp Remove
+texture_view_descriptor_size: proc() -> u32 : _texture_view_descriptor_size
+texture_rw_view_descriptor_size: proc() -> u32 : _texture_rw_view_descriptor_size
+sampler_descriptor_size: proc() -> u32 : _sampler_descriptor_size
 
 // Shaders
 shader_create: proc(code: []u32, type: Shader_Type_Graphics, entry_point_name := "main", name := "", loc := #caller_location) -> Shader : _shader_create

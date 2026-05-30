@@ -25,9 +25,6 @@ Semaphore :: distinct Handle
 Shader :: distinct Handle
 BVH :: struct { _: Handle }
 Descriptor_Heap :: struct { _: Handle }
-//Texture_Descriptor :: struct { bytes: [8]u64 }
-//Sampler_Descriptor :: struct { bytes: [4]u64 }
-//BVH_Descriptor :: struct { bytes: [4]u64 }
 Texture_Descriptor :: distinct Big_Handle
 Sampler_Descriptor :: distinct Handle
 
@@ -367,8 +364,7 @@ cmd_copy_to_texture: proc(cmd_buf: Command_Buffer, dst: Texture, src: gpuptr, re
 // TODO: Missing cmd_copy_from_texture
 cmd_blit_texture: proc(cmd_buf: Command_Buffer, dst: Texture, dst_rect: Blit_Rect, src: Texture, src_rect: Blit_Rect, filter: Filter, loc := #caller_location) : _cmd_blit_texture
 
-cmd_set_desc_heap: proc(cmd_buf: Command_Buffer, textures, textures_rw, samplers, bvhs: gpuptr, loc := #caller_location) : _cmd_set_desc_heap
-cmd_set_desc_heap_2: proc(cmd_buf: Command_Buffer, heap: Descriptor_Heap, loc := #caller_location) : _cmd_set_desc_heap_2
+cmd_set_desc_heap: proc(cmd_buf: Command_Buffer, heap: Descriptor_Heap, loc := #caller_location) : _cmd_set_desc_heap
 
 cmd_add_wait_semaphore: proc(cmd_buf: Command_Buffer, sem: Semaphore, wait_value: u64, loc := #caller_location) : _cmd_add_wait_semaphore
 cmd_add_signal_semaphore: proc(cmd_buf: Command_Buffer, sem: Semaphore, signal_value: u64, loc := #caller_location) : _cmd_add_signal_semaphore

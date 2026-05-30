@@ -451,7 +451,6 @@ _init :: proc(validation := true, loc := #caller_location) -> bool
         required_extensions := make([dynamic]cstring, allocator = scratch)
         append(&required_extensions, vk.KHR_SWAPCHAIN_EXTENSION_NAME)
         append(&required_extensions, vk.EXT_SHADER_OBJECT_EXTENSION_NAME)
-        append(&required_extensions, vk.EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME)
         append(&required_extensions, vk.KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME)
         for req_ext in EXTRA_DEVICE_EXTENSIONS {
             append(&required_extensions, req_ext)
@@ -495,6 +494,9 @@ _init :: proc(validation := true, loc := #caller_location) -> bool
             runtimeDescriptorArray = true,
             shaderSampledImageArrayNonUniformIndexing = true,
             shaderStorageImageArrayNonUniformIndexing = true,
+            descriptorBindingSampledImageUpdateAfterBind = true,
+            descriptorBindingStorageImageUpdateAfterBind = true,
+            descriptorBindingPartiallyBound = true,
             timelineSemaphore = true,
             bufferDeviceAddress = true,
             drawIndirectCount = true,
@@ -534,6 +536,7 @@ _init :: proc(validation := true, loc := #caller_location) -> bool
             sType = .PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
             pNext = next,
             accelerationStructure = true,
+            descriptorBindingAccelerationStructureUpdateAfterBind = true,
         }
         if .Raytracing in ctx.features do next = raytracing_features
         rayquery_features := &vk.PhysicalDeviceRayQueryFeaturesKHR {
@@ -563,9 +566,17 @@ _init :: proc(validation := true, loc := #caller_location) -> bool
 
     // Common resources
     {
+        flags_ci := vk.DescriptorSetLayoutBindingFlagsCreateInfo {
+            sType = .DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
+            bindingCount = 1,
+            pBindingFlags = &vk.DescriptorBindingFlags { .UPDATE_AFTER_BIND, .PARTIALLY_BOUND },
+        }
+
         {
             layout_ci := vk.DescriptorSetLayoutCreateInfo {
                 sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+                pNext = &flags_ci,
+                flags = { .UPDATE_AFTER_BIND_POOL },
                 bindingCount = 1,
                 pBindings = &vk.DescriptorSetLayoutBinding {
                     binding = 0,
@@ -581,6 +592,8 @@ _init :: proc(validation := true, loc := #caller_location) -> bool
         {
             layout_ci := vk.DescriptorSetLayoutCreateInfo {
                 sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+                pNext = &flags_ci,
+                flags = { .UPDATE_AFTER_BIND_POOL },
                 bindingCount = 1,
                 pBindings = &vk.DescriptorSetLayoutBinding {
                     binding = 0,
@@ -596,6 +609,8 @@ _init :: proc(validation := true, loc := #caller_location) -> bool
         {
             layout_ci := vk.DescriptorSetLayoutCreateInfo {
                 sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+                pNext = &flags_ci,
+                flags = { .UPDATE_AFTER_BIND_POOL },
                 bindingCount = 1,
                 pBindings = &vk.DescriptorSetLayoutBinding {
                     binding = 0,
@@ -612,6 +627,8 @@ _init :: proc(validation := true, loc := #caller_location) -> bool
         {
             layout_ci := vk.DescriptorSetLayoutCreateInfo {
                 sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+                pNext = &flags_ci,
+                flags = { .UPDATE_AFTER_BIND_POOL },
                 bindingCount = 1,
                 pBindings = &vk.DescriptorSetLayoutBinding {
                     binding = 0,
@@ -671,7 +688,7 @@ _init :: proc(validation := true, loc := #caller_location) -> bool
             }
             desc_pool_ci := vk.DescriptorPoolCreateInfo {
                 sType = .DESCRIPTOR_POOL_CREATE_INFO,
-                flags = { .FREE_DESCRIPTOR_SET },
+                flags = { .FREE_DESCRIPTOR_SET, .UPDATE_AFTER_BIND },
                 maxSets = 128,
                 poolSizeCount = u32(len(pool_sizes)),
                 pPoolSizes = raw_data(pool_sizes)
@@ -1251,9 +1268,6 @@ _device_limits :: proc() -> Device_Limits
 }
 
 // Memory
-
-@(private="file")
-Descriptor_Buffer_Usage :: vk.BufferUsageFlags { .RESOURCE_DESCRIPTOR_BUFFER_EXT, .SHADER_DEVICE_ADDRESS, .TRANSFER_SRC, .TRANSFER_DST }
 
 _mem_alloc_raw :: proc(#any_int el_size, #any_int el_count, #any_int align: i64, mem_type := Memory.Default, loc := #caller_location) -> ptr
 {

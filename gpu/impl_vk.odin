@@ -15,7 +15,9 @@ import vk "vendor:vulkan"
 import "vma"
 
 @(private="file")
-Max_Textures :: 65535
+Max_Textures :: 65536
+@(private="file")
+Max_Samplers :: 256
 @(private="file")
 Max_BVHs :: 16
 
@@ -51,7 +53,6 @@ Context :: struct
     desc_layouts: [dynamic]vk.DescriptorSetLayout,
     common_pipeline_layout_graphics: vk.PipelineLayout,
     common_pipeline_layout_compute: vk.PipelineLayout,
-    desc_pool: vk.DescriptorPool,
 
     // Resource pools
     allocs: Resource_Pool(Alloc_Handle, Alloc_Info),
@@ -178,6 +179,7 @@ Command_Buffer_Info :: struct {
 @(private="file")
 Descriptor_Heap_Info :: struct
 {
+    desc_pool: vk.DescriptorPool,
     textures: vk.DescriptorSet,
     textures_rw: vk.DescriptorSet,
     samplers: vk.DescriptorSet,
@@ -615,7 +617,7 @@ _init :: proc(validation := true, loc := #caller_location) -> bool
                 pBindings = &vk.DescriptorSetLayoutBinding {
                     binding = 0,
                     descriptorType = .SAMPLER,
-                    descriptorCount = Max_Textures,
+                    descriptorCount = Max_Samplers,
                     stageFlags = { .VERTEX, .FRAGMENT, .COMPUTE },
                 },
             }
@@ -676,24 +678,6 @@ _init :: proc(validation := true, loc := #caller_location) -> bool
                 pSetLayouts = raw_data(ctx.desc_layouts),
             }
             vk_check(vk.CreatePipelineLayout(ctx.device, &pipeline_layout_ci, nil, &ctx.common_pipeline_layout_compute))
-        }
-
-        // Descriptor Pool
-        {
-            pool_sizes := []vk.DescriptorPoolSize {
-                { type = .SAMPLED_IMAGE, descriptorCount = Max_Textures },
-                { type = .STORAGE_IMAGE, descriptorCount = Max_Textures },
-                { type = .SAMPLER,       descriptorCount = Max_Textures },
-                { type = .ACCELERATION_STRUCTURE_KHR, descriptorCount = Max_BVHs },
-            }
-            desc_pool_ci := vk.DescriptorPoolCreateInfo {
-                sType = .DESCRIPTOR_POOL_CREATE_INFO,
-                flags = { .FREE_DESCRIPTOR_SET, .UPDATE_AFTER_BIND },
-                maxSets = 128,
-                poolSizeCount = u32(len(pool_sizes)),
-                pPoolSizes = raw_data(pool_sizes)
-            }
-            vk_check(vk.CreateDescriptorPool(ctx.device, &desc_pool_ci, nil, &ctx.desc_pool))
         }
     }
 
@@ -939,7 +923,6 @@ _cleanup :: proc(loc := #caller_location)
 
         vk.DestroyPipelineLayout(ctx.device, ctx.common_pipeline_layout_graphics, nil)
         vk.DestroyPipelineLayout(ctx.device, ctx.common_pipeline_layout_compute, nil)
-        vk.DestroyDescriptorPool(ctx.device, ctx.desc_pool, nil)
     }
 
     for semaphore in ctx.cmd_bufs_sem_vals {
@@ -1657,11 +1640,53 @@ _sampler_descriptor :: proc(sampler_desc: Sampler_Desc, loc := #caller_location)
     return transmute(Sampler_Descriptor) sampler
 }
 
-_desc_heap_create :: proc(name := "", loc := #caller_location) -> Descriptor_Heap
+_desc_heap_create :: proc(texture_count: u32 = 65536,
+                          texture_rw_count: u32 = 65536,
+                          sampler_count: u32 = 32,
+                          bvh_count: u32 = 16,
+                          name := "", loc := #caller_location) -> Descriptor_Heap
 {
+    if ctx.validation
+    {
+        ok := true
+        if texture_count > Max_Textures {
+            log.errorf("'texture_count' is %v and is greater than the maximum allowed by no_gfx (%v)", texture_count, Max_Textures, location = loc)
+            ok = false
+        }
+        if texture_rw_count > Max_Textures {
+            log.errorf("'texture_rw_count' is %v and is greater than the maximum allowed by no_gfx (%v)", texture_rw_count, Max_Textures, location = loc)
+            ok = false
+        }
+        if sampler_count > Max_Samplers {
+            log.errorf("'sampler_count' is %v and is greater than the maximum allowed by no_gfx (%v)", sampler_count, Max_Samplers, location = loc)
+            ok = false
+        }
+        if bvh_count > Max_BVHs {
+            log.errorf("'bvh_count' is %v and is greater than the maximum allowed by no_gfx (%v)", bvh_count, Max_BVHs, location = loc)
+            ok = false
+        }
+        if !ok do return {}
+    }
+
+    pool_sizes := []vk.DescriptorPoolSize {
+        { type = .SAMPLED_IMAGE, descriptorCount = Max_Textures },
+        { type = .STORAGE_IMAGE, descriptorCount = Max_Textures },
+        { type = .SAMPLER,       descriptorCount = Max_Samplers },
+        { type = .ACCELERATION_STRUCTURE_KHR, descriptorCount = Max_BVHs },
+    }
+    desc_pool_ci := vk.DescriptorPoolCreateInfo {
+        sType = .DESCRIPTOR_POOL_CREATE_INFO,
+        flags = { .FREE_DESCRIPTOR_SET, .UPDATE_AFTER_BIND },
+        maxSets = 4,
+        poolSizeCount = u32(len(pool_sizes)),
+        pPoolSizes = raw_data(pool_sizes)
+    }
+    desc_pool: vk.DescriptorPool
+    vk_check(vk.CreateDescriptorPool(ctx.device, &desc_pool_ci, nil, &desc_pool))
+
     alloc_info := vk.DescriptorSetAllocateInfo {
         sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-        descriptorPool = ctx.desc_pool,
+        descriptorPool = desc_pool,
         descriptorSetCount = u32(len(ctx.desc_layouts)),  // NOTE: This is 3 if the device doesn't support RT
         pSetLayouts = raw_data(ctx.desc_layouts),
     }
@@ -1674,6 +1699,7 @@ _desc_heap_create :: proc(name := "", loc := #caller_location) -> Descriptor_Hea
         textures_rw = desc_sets[1],
         samplers = desc_sets[2],
         bvhs = desc_sets[3],
+        desc_pool = desc_pool,
     }
     return pool_add(&ctx.desc_heaps, desc_heap_info, { created_at = loc, name = name })
 }
@@ -1692,7 +1718,9 @@ _desc_heap_destroy :: proc(heap: Descriptor_Heap, loc := #caller_location)
     to_free := [4]vk.DescriptorSet {
         heap_info.textures, heap_info.textures_rw, heap_info.samplers, heap_info.bvhs
     }
-    vk_check(vk.FreeDescriptorSets(ctx.device, ctx.desc_pool, u32(len(ctx.desc_layouts)), &to_free[0]))
+    vk_check(vk.FreeDescriptorSets(ctx.device, heap_info.desc_pool, u32(len(ctx.desc_layouts)), &to_free[0]))
+
+    vk.DestroyDescriptorPool(ctx.device, heap_info.desc_pool, nil)
 
     pool_remove(&ctx.desc_heaps, heap)
 }

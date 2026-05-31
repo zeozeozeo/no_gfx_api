@@ -311,7 +311,7 @@ texture_create: proc(desc: Texture_Desc, storage: gpuptr, queue: Queue = nil, si
 texture_destroy: proc(texture: Texture, loc := #caller_location) : _texture_destroy
 
 // Descriptors
-desc_heap_create: proc(name := "", loc := #caller_location) -> Descriptor_Heap : _desc_heap_create
+desc_heap_create: proc(texture_count: u32 = 65536, texture_rw_count: u32 = 65536, sampler_count: u32 = 32, bvh_count: u32 = 16, name := "", loc := #caller_location) -> Descriptor_Heap : _desc_heap_create
 desc_heap_destroy: proc(heap: Descriptor_Heap, loc := #caller_location) : _desc_heap_destroy
 desc_heap_set_textures: proc(heap: Descriptor_Heap, start_idx: u32, textures: []Texture_Descriptor, loc := #caller_location) : _desc_heap_set_textures
 desc_heap_set_textures_rw: proc(heap: Descriptor_Heap, start_idx: u32, textures: []Texture_Descriptor, loc := #caller_location) : _desc_heap_set_textures_rw
@@ -835,14 +835,22 @@ Descriptor_Pool :: struct
     bvh_pool: Descriptor_Pool_Resource(BVH),
 }
 
-desc_pool_create :: proc(loc := #caller_location) -> Descriptor_Pool
+// NOTE: There can be fragmentation so make sure you reverse more
+// slots than are actually needed. Most of the time a single global
+// descriptor pool is good enough and for that, these defaults are
+// fairly reasonable.
+desc_pool_create :: proc(texture_count: u32 = 65536,
+                         texture_rw_count: u32 = 65536,
+                         sampler_count: u32 = 32,
+                         bvh_count: u32 = 16,
+                         loc := #caller_location) -> Descriptor_Pool
 {
     res: Descriptor_Pool
-    res.texture_pool = desc_pool_resource_init(100, Texture_Descriptor)
-    res.sampler_pool = desc_pool_resource_init(100, Sampler_Descriptor)
-    res.texture_rw_pool = desc_pool_resource_init(100, Texture_Descriptor)
-    res.bvh_pool = desc_pool_resource_init(100, BVH)
-    res.heap = desc_heap_create(loc = loc)
+    res.texture_pool = desc_pool_resource_init(i64(texture_count), Texture_Descriptor)
+    res.sampler_pool = desc_pool_resource_init(i64(sampler_count), Sampler_Descriptor)
+    res.texture_rw_pool = desc_pool_resource_init(i64(texture_rw_count), Texture_Descriptor)
+    res.bvh_pool = desc_pool_resource_init(i64(bvh_count), BVH)
+    res.heap = desc_heap_create(texture_count, texture_rw_count, sampler_count, bvh_count, loc = loc)
     return res
 }
 

@@ -3662,23 +3662,6 @@ _vk_wrap_image :: proc(image: vk.Image, desc: Texture_Desc, name := "", loc := #
     }
 }
 
-_vk_unwrap_image :: proc(texture: Texture, loc := #caller_location)
-{
-    if ctx.validation
-    {
-        ok := true
-        ok &= pool_check(&ctx.textures, texture.handle, "texture", loc)
-        if !ok do return
-    }
-
-    tex_info := pool_get(&ctx.textures, texture.handle)
-    for view in tex_info.views {
-        vk.DestroyImageView(ctx.device, view.view, nil)
-    }
-    delete(tex_info.views)
-    pool_remove(&ctx.textures, texture.handle)
-}
-
 @(thread_local) EXTRA_OPT_DEVICE_EXTENSIONS: [dynamic]cstring
 _vk_add_opt_device_extension :: proc(extension: cstring)
 {

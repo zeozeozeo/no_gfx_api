@@ -3280,7 +3280,7 @@ create_swapchain :: proc(width: u32, height: u32, frames_in_flight: u32) -> Swap
         imageColorSpace = surface_format.colorSpace,
         imageExtent = { res.width, res.height },
         imageArrayLayers = 1,
-        imageUsage = { .COLOR_ATTACHMENT },
+        imageUsage = { .COLOR_ATTACHMENT, .TRANSFER_SRC, .TRANSFER_DST  },
         preTransform = surface_caps.currentTransform,
         compositeAlpha = { .OPAQUE },
         presentMode = present_mode,
@@ -3708,7 +3708,8 @@ to_vk_render_attachment :: #force_inline proc(attach: Render_Attachment) -> vk.R
             subresourceRange = {
                 aspectMask = plane_aspect,
                 levelCount = 1,
-                layerCount = 1,
+                baseArrayLayer = u32(view_desc.base_layer),
+                layerCount = u32(view_desc.layer_count) if view_desc.layer_count > 0 else 1,
             }
         }
         view = get_or_add_image_view(texture.handle, image_view_ci)
@@ -3725,7 +3726,8 @@ to_vk_render_attachment :: #force_inline proc(attach: Render_Attachment) -> vk.R
             subresourceRange = {
                 aspectMask = plane_aspect,
                 levelCount = 1,
-                layerCount = 1,
+                baseArrayLayer = u32(resolve_view_desc.base_layer),
+                layerCount = u32(resolve_view_desc.layer_count) if resolve_view_desc.layer_count > 0 else 1,
             }
         }
         resolve_view = get_or_add_image_view(resolve_texture.handle, resolve_image_view_ci)

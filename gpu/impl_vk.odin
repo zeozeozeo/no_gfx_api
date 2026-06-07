@@ -743,7 +743,7 @@ _init :: proc(validation := true, loc := #caller_location) -> bool
     return true
 
     // From GLFW: https://github.com/glfw/glfw
-    get_instance_proc_address :: proc "c"(p: rawptr, name: cstring) -> rawptr
+    get_instance_proc_address :: proc "system"(p: rawptr, name: cstring) -> rawptr
     {
         context = runtime.default_context()
 
